@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WASM = ROOT / "target/wasm32-unknown-unknown/release/legibility_wasm.wasm"
-TEMPLATE = ROOT / "js/testbed/offline.html"
+TEMPLATE = ROOT / "js/testbed/demo.html"
 
 
 def build_wasm() -> Path:

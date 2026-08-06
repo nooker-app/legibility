@@ -72,6 +72,94 @@ PY
   fi
 fi
 
+# 4. The two ways of opening the demo must be the same demo. Same input, same JSON, or the claim
+#    that `lgb serve` and the single file agree is only a claim. They share one template and one
+#    WebAssembly module, so this checks that the wiring did not diverge, not the engine.
+PORT=8898
+if [ ! -x ./target/release/lgb ]; then
+  printf '  SKIP  lgb not built; two-mode equivalence not checked\n'
+elif [ ! -x "$CHROME" ]; then
+  printf '  SKIP  no Chrome found; two-mode equivalence not checked\n'
+else
+  ./target/release/lgb serve --port "$PORT" >/tmp/lgb-verify-serve.log 2>&1 &
+  serve_pid=$!
+  sleep 1
+  "$CHROME" --headless --disable-gpu --no-sandbox --virtual-time-budget=8000 \
+    --dump-dom "http://127.0.0.1:$PORT/#autorun" >/tmp/lgb-served-dom.html 2>/dev/null
+  kill "$serve_pid" 2>/dev/null
+  wait "$serve_pid" 2>/dev/null
+  if python3 - <<'PY2'
+import html, re, sys
+def payload(path):
+    s = open(path, encoding='utf-8', errors='replace').read()
+    m = re.search(r'<pre class="json" id="json">(.*?)</pre>', s, re.S)
+    return html.unescape(m.group(1)) if m else None
+a, b = payload('/tmp/lgb-offline-dom.html'), payload('/tmp/lgb-served-dom.html')
+if a is None: print('        the single-file run produced no JSON'); sys.exit(1)
+if b is None: print('        the served run produced no JSON'); sys.exit(1)
+if a != b:
+    print('        the two modes disagree on the same input')
+    sys.exit(1)
+print(f'        identical output, {len(a)} bytes')
+PY2
+  then
+    printf '  PASS  file:// and lgb serve produce identical output\n'
+  else
+    printf '  FAIL  file:// and lgb serve disagree\n'; fail=1
+  fi
+fi
+
+# 5. URL input from file://. "Offline" means nothing but this machine is involved, not that the
+#    network is unreachable -- so the single file may ask a helper on localhost to fetch a page.
+#    Whether that hop works cannot be read off the source: a file:// document has origin `null`, so
+#    it depends on the helper's CORS header being right.
+#
+#    The page fetched is served by a second local server, not by the helper itself: the helper takes
+#    one connection at a time, so asking it to fetch its own URL deadlocks it against itself.
+if [ ! -x ./target/release/lgb ] || [ ! -x "$CHROME" ]; then
+  printf '  SKIP  url-from-file:// not checked\n'
+else
+  ORIGIN_PORT=8897
+  tmp=$(mktemp -d)
+  cat > "$tmp/page.html" <<'HTML'
+<!doctype html><html><head><title>Fetched through the helper</title></head><body>
+<main><article>
+<h1>Fetched through the helper</h1>
+<p>This page was served by a local origin, pulled in by lgb serve, and extracted in the browser.</p>
+<p>If you can read this sentence in the article pane, the file:// to helper hop works.</p>
+</article></main></body></html>
+HTML
+  ( cd "$tmp" && python3 -m http.server "$ORIGIN_PORT" >/dev/null 2>&1 & echo $! > "$tmp/origin.pid" )
+  ./target/release/lgb serve --port "$PORT" >/tmp/lgb-verify-serve2.log 2>&1 &
+  serve_pid=$!
+  sleep 1.2
+  enc=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote('http://127.0.0.1:'+sys.argv[1]+'/page.html',safe=''))" "$ORIGIN_PORT")
+  "$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
+    --virtual-time-budget=12000 \
+    --dump-dom "file://$PWD/$FILE#url=$enc&port=$PORT" >/tmp/lgb-url-dom.html 2>/dev/null
+  kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null
+  kill "$(cat "$tmp/origin.pid")" 2>/dev/null
+  rm -rf "$tmp"
+  if python3 - <<'PY2'
+import re, sys
+s = open('/tmp/lgb-url-dom.html', encoding='utf-8', errors='replace').read()
+err = re.search(r'<div id="article">\s*<p class="err">(.*?)</p>', s, re.S)
+if err:
+    print('        ' + re.sub(r'<[^>]+>', '', err.group(1)).strip()[:200]); sys.exit(1)
+size = re.search(r'<p class="note" id="insize">(.*?)</p>', s, re.S)
+if not size or 'received' not in size.group(1):
+    print('        the fetched page never reached the engine'); sys.exit(1)
+if 'helper hop works' not in s:
+    print('        the fetched body is not in the article pane'); sys.exit(1)
+print('        ' + size.group(1).strip())
+PY2
+  then
+    printf '  PASS  file:// fetched a URL through the local helper\n'
+  else
+    printf '  FAIL  file:// could not fetch through the local helper\n'; fail=1
+  fi
+fi
+
 echo
 [ "$fail" = 0 ] && echo "offline demo: ALL PASS" || echo "offline demo: FAILURES PRESENT"
 exit $fail

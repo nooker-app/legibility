@@ -74,7 +74,7 @@ fn main() {
                 .position(|a| a == "--port")
                 .and_then(|i| rest.get(i + 1))
                 .and_then(|p| p.parse().ok())
-                .unwrap_or(8080u16);
+                .unwrap_or(8899u16);
             if let Err(e) = serve::serve(port) {
                 eprintln!("lgb serve: {e}");
                 std::process::exit(1);

@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>legibility — offline demo</title>
+<title>legibility — demo</title>
 <style>
   :root { color-scheme: light dark; --line: #8884; --dim: #8888; --ok: #2f6f4f; --bad: #c33; }
   * { box-sizing: border-box; }
@@ -21,6 +21,10 @@
   button:disabled { opacity: .5; cursor: default; }
   textarea { width: 100%; min-height: 14rem; font: .78rem/1.5 ui-monospace, monospace; padding: .5rem .6rem;
              border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; resize: vertical; }
+  input[type=url] { flex: 1 1 18rem; min-width: 0; font: inherit; padding: .4rem .6rem;
+      border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; }
+  input[type=number] { width: 6rem; font: inherit; padding: .3rem .4rem;
+      border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; }
   .row { display: flex; gap: .5rem; align-items: center; margin: .6rem 0; flex-wrap: wrap; }
   #drop { border: 1.5px dashed var(--line); border-radius: 6px; padding: .8rem; text-align: center; color: var(--dim); font-size: .82rem; }
   #drop.over { border-color: var(--ok); color: var(--ok); }
@@ -44,25 +48,36 @@
 </style>
 
 <header>
-  <h1>legibility <span class="pill" id="stage">offline · single file</span></h1>
-  <p class="note">Runs entirely in this page. No server, no network — the WebAssembly module is
-    embedded in the file, so it works from <code>file://</code> and on a plane.
-    <strong>URL input is not available here</strong>: a page opened from disk cannot fetch a
-    third-party site (CORS forbids it, and no client-side code changes that). Use
-    <code>lgb serve</code> for URL fetching, or paste the page source below —
-    <em>View Source → select all → copy</em>.</p>
+  <h1>legibility <span class="pill" id="stage">loading…</span></h1>
+  <p class="note">Extraction runs <strong>in this page</strong>, as WebAssembly — the same module
+    whichever way you opened it, so results are identical. Paste HTML, choose a file, or enter a
+    URL. <strong>File is the reliable path for a big page</strong>: copying a large DOM through the
+    clipboard is where truncation happens, and a browser's “copy outerHTML” will cut a long
+    document without saying so. Save the page (⌘S) and pick the file instead.</p>
+  <p class="note" id="urlnote"></p>
 </header>
 
 <main>
   <section class="pane">
     <h2>Input</h2>
-    <textarea id="html" spellcheck="false" placeholder="Paste HTML here, or drop a .html file below"></textarea>
-    <div id="drop">drop a <code>.html</code> file</div>
+    <div class="row">
+      <input type="url" id="url" spellcheck="false" placeholder="https://news.ycombinator.com/item?id=1">
+      <button id="go-url">Fetch &amp; extract</button>
+    </div>
+    <div class="row" id="portrow">
+      <label class="note" for="port">helper port</label>
+      <input type="number" id="port" value="8899" min="1" max="65535">
+      <span class="note">URL fetching goes through <code>lgb serve</code> on your own machine.</span>
+    </div>
+    <textarea id="html" spellcheck="false" placeholder="…or paste HTML here"></textarea>
+    <div id="drop">drop a <code>.html</code> file, or <button id="pick">choose a file</button></div>
+    <input type="file" id="file" accept=".html,.htm,text/html" hidden>
     <div class="row">
       <button class="go" id="go">Extract</button>
       <button id="sample">Load sample</button>
       <span class="note" id="timing"></span>
     </div>
+    <p class="note" id="insize"></p>
 
     <h2>Where the page's text went</h2>
     <table class="stats" id="roles"><tr><td class="note" colspan="4">no result yet</td></tr></table>
@@ -94,10 +109,17 @@
 "use strict";
 
 // ---------------------------------------------------------------------------------------------
-// The module, embedded. See scripts/build-offline-demo.py -- a fetch() for a sibling .wasm is
-// blocked by CORS on file://, so the bytes live here.
+// The module. Two delivery routes, one engine.
+//
+// From `file://` the bytes must be embedded: fetching a sibling .wasm is blocked by CORS there,
+// and no client-side code changes that (see scripts/build-offline-demo.py). When `lgb serve` hands
+// this page over http the placeholder is left alone and the module is fetched from next door, which
+// keeps the served page small and means the server has no engine of its own to drift from.
 // ---------------------------------------------------------------------------------------------
 const WASM_BASE64 = "/*__WASM_BASE64__*/";
+// Careful: the placeholder is *inside* the quotes, so an unsubstituted template yields a 20-char
+// string, not an empty one. Testing `.length` here would always report "embedded".
+const EMBEDDED = !WASM_BASE64.startsWith("/*");
 
 const $ = (id) => document.getElementById(id);
 
@@ -112,17 +134,32 @@ function b64ToBytes(b64) {
 // the module itself and is version-coupled to the CLI that produced it.
 let wasm = null;
 
+async function moduleBytes() {
+  if (EMBEDDED) return b64ToBytes(WASM_BASE64);
+  const res = await fetch("./legibility.wasm");
+  if (!res.ok) throw new Error(`could not load ./legibility.wasm (${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 async function initWasm() {
-  const bytes = b64ToBytes(WASM_BASE64);
-  // instantiate, not instantiateStreaming: there is no Response to stream from, and this path also
-  // sidesteps servers that mislabel .wasm as application/octet-stream.
+  const bytes = await moduleBytes();
+  // instantiate, not instantiateStreaming: there is no Response to stream from in the embedded
+  // case, and this path also sidesteps servers that mislabel .wasm as application/octet-stream.
   const { instance } = await WebAssembly.instantiate(bytes, {});
   wasm = instance.exports;
   const v = wasm.lgb_schema_version();
   $("engine").innerHTML =
     `<tr><td>module</td><td class="num">${(bytes.length / 1024).toFixed(0)} KB</td></tr>` +
     `<tr><td>schema</td><td class="num">v${v}</td></tr>` +
-    `<tr><td>network</td><td>never contacted</td></tr>`;
+    `<tr><td>delivery</td><td>${EMBEDDED ? "embedded in this file" : "fetched from lgb serve"}</td></tr>` +
+    `<tr><td>extraction</td><td>in this page, always</td></tr>`;
+  $("stage").textContent = EMBEDDED ? "single file · wasm" : "lgb serve · wasm";
+  $("urlnote").innerHTML = EMBEDDED
+    ? 'Opened from disk. Everything except URL fetching needs nothing at all; for a URL, run ' +
+      '<code>lgb serve</code> and this page will ask it to fetch — your machine only, no third party.'
+    : 'Served by <code>lgb serve</code>, which fetches URLs for you. It does not extract: the ' +
+      'engine below is the same WebAssembly module the single-file build embeds.';
+  if (!EMBEDDED) $("portrow").hidden = true;
 }
 
 function extract(html) {
@@ -145,6 +182,19 @@ function extract(html) {
 const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a", inert: "#4a4a4a" };
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
+// Bytes actually handed to the engine, printed on every run.
+//
+// This is here because "the demo cut my long HTML" is otherwise unfalsifiable from the outside:
+// the engine handles 300 KB fine (measured), so a short result means the input arrived short --
+// almost always the clipboard. Showing the number turns a suspicion into a fact you can compare
+// against the file on disk.
+function showSize(html, nodes) {
+  const kb = (new Blob([html]).size / 1024).toFixed(1);
+  $("insize").textContent =
+    `engine received ${kb} KB / ${html.length.toLocaleString()} chars` +
+    (nodes == null ? "" : ` → ${nodes.toLocaleString()} nodes`);
+}
+
 function run() {
   const html = $("html").value;
   if (!html.trim()) { $("article").innerHTML = '<p class="note">Nothing to extract.</p>'; return; }
@@ -155,6 +205,7 @@ function run() {
     const ms = performance.now() - t0;
     $("timing").textContent =
       `${ms.toFixed(1)} ms for ${(new Blob([html]).size / 1024).toFixed(0)} KB`;
+    showSize(html, (data.diagnostics || {}).node_count);
     render(data);
   } catch (e) {
     $("article").innerHTML = `<p class="err">${esc(e.message || e)}</p>`;
@@ -298,6 +349,48 @@ const SAMPLE = `<!doctype html><html lang="ko"><head>
 $("go").onclick = run;
 $("sample").onclick = () => { $("html").value = SAMPLE; run(); };
 
+// URL input. The fetch happens in `lgb serve` -- a process on this machine -- because a browser
+// cannot fetch a third-party site from a page it did not come from, whatever the protocol. That
+// keeps the promise the single-file build actually makes: nothing but your own device is involved.
+// A public CORS proxy would work and is exactly what must not be used here.
+function helperBase() {
+  if (location.protocol === "http:" || location.protocol === "https:") return "";
+  const port = Number($("port").value) || 8899;
+  return `http://127.0.0.1:${port}`;
+}
+
+async function runUrl() {
+  const url = $("url").value.trim();
+  if (!url) return;
+  for (const b of [$("go"), $("go-url")]) b.disabled = true;
+  $("article").innerHTML = '<p class="note">fetching…</p>';
+  try {
+    const res = await fetch(`${helperBase()}/fetch?url=${encodeURIComponent(url)}`);
+    const body = await res.text();
+    if (!res.ok) throw new Error(body.trim() || `helper returned ${res.status}`);
+    $("html").value = body;
+    run();
+  } catch (e) {
+    const hint = EMBEDDED
+      ? `\n\nStart the helper with:  lgb serve --port ${Number($("port").value) || 8899}`
+      : "";
+    $("article").innerHTML = `<p class="err">${esc((e.message || e) + hint)}</p>`;
+  } finally {
+    for (const b of [$("go"), $("go-url")]) b.disabled = false;
+  }
+}
+$("go-url").onclick = runUrl;
+$("url").addEventListener("keydown", (e) => { if (e.key === "Enter") runUrl(); });
+
+// A file, by picker or by drop. Immune to clipboard limits, which is the whole point.
+$("pick").onclick = () => $("file").click();
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $("html").value = await f.text();
+  run();
+});
+
 const drop = $("drop");
 for (const ev of ["dragenter", "dragover"]) {
   drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -317,10 +410,21 @@ drop.addEventListener("drop", async (e) => {
 // verification can assert the file really works from file:// with the network blocked -- claiming
 // "offline" without loading it in a browser would be an assertion rather than a fact.
 initWasm().then(() => {
-  if (location.hash === "#autorun") {
+  // URLSearchParams rather than hand-splitting: the value is a percent-encoded URL that itself
+  // contains `?`, `&` and `=`, and decoding the whole hash before splitting would corrupt it.
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.has("autorun")) {
     $("html").value = SAMPLE;
     run();
     document.title = "legibility — autorun done";
+  } else if (hp.has("url")) {
+    // `#url=<encoded>[&port=N]` runs the URL path on load. A shareable link, and the only way a
+    // script can verify that a page opened from disk really reaches the local helper: a file://
+    // document has origin `null`, so that hop either works or it does not and reading the code
+    // cannot tell you which.
+    if (hp.has("port")) $("port").value = hp.get("port");
+    $("url").value = hp.get("url");
+    runUrl().then(() => { document.title = "legibility — url done"; });
   }
 }).catch((e) => {
   $("article").innerHTML = `<p class="err">could not start the WebAssembly module: ${esc(e.message || e)}</p>`;
