@@ -21,10 +21,8 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-use legibility_core::{Arena, Limits, LimitsHit, NodeId, NodeKind, TagId};
-use legibility_dom::serialize::{serialize_region, SerializeOptions};
+use legibility_core::Limits;
 use legibility_dom::BuildArena;
-use legibility_sanitize::Article;
 
 const INDEX: &str = include_str!("demo.html");
 
@@ -162,236 +160,12 @@ fn fetch(url: &str) -> Result<String, String> {
 fn extract_json(html: &str, url: Option<&str>) -> String {
     let (arena, hit) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
-    let sel = out.selection;
-    let region = sel.article;
-
-    let mut s = String::from("{\"schema_version\":1");
-    if let Some(u) = url {
-        s.push_str(",\"url\":");
-        s.push_str(&json_string(u));
-    }
-    s.push_str(",\"article\":");
-    match region {
-        Some(n) => {
-            let (h, rep) =
-                serialize_region::<Article>(&arena, n, SerializeOptions::default());
-            s.push_str("{\"html\":");
-            s.push_str(&json_string(h.as_str()));
-            s.push_str(",\"text\":");
-            s.push_str(&json_string(&prose_text(&arena, n)));
-            s.push_str(",\"tag\":");
-            s.push_str(&json_string(
-                arena.tag.get(n.idx()).copied().and_then(TagId::known_name).unwrap_or("?"),
-            ));
-            s.push_str(&format!(
-                ",\"prose_len\":{},\"dropped_subtrees\":{},\"unwrapped\":{},\"truncated\":{}",
-                arena.prose_len.get(n.idx()).copied().unwrap_or(0),
-                rep.dropped_subtrees,
-                rep.unwrapped_elements,
-                rep.truncated
-            ));
-            s.push_str(&format!(
-                ",\"confidence\":{},\"dispersion_floor\":{},\"outermost\":{}",
-                sel.confidence, sel.dispersion_floor_used, sel.region_is_outermost_by_argmax
-            ));
-            s.push_str(",\"calibrated\":false}");
-        }
-        None => s.push_str("null"),
-    }
-    if let Some(r) = sel.no_article {
-        s.push_str(",\"no_article\":");
-        s.push_str(&json_string(&format!("{r:?}")));
-    }
-    s.push_str(",\"comments\":");
-    s.push_str(&comments_json(&out.comments));
-    s.push_str(&format!(
-        ",\"page_kind\":{},\"comment_mask_reverted\":{},\"group_count\":{},\"comment_prose_share\":{:.3}",
-        json_string(if out.is_listing { "listing" } else { "article-or-discussion" }),
-        out.comment_mask_reverted,
-        out.group_count,
-        out.comment_prose_share
-    ));
-    s.push_str(",\"metadata\":");
-    s.push_str(&metadata_json(&arena, &out.metadata));
-    s.push_str(&format!(
-        ",\"diagnostics\":{{\"node_count\":{},\
-         \"page_prose_len\":{},\"page_control_len\":{},\"page_hidden_len\":{},\"page_alt_len\":{},\
-         \"limits_hit\":{}}}}}",
-        arena.len(),
-        arena.prose_len.first().copied().unwrap_or(0),
-        arena.control_len.first().copied().unwrap_or(0),
-        arena.hidden_len.first().copied().unwrap_or(0),
-        arena.alt_len.first().copied().unwrap_or(0),
-        limits_json(hit)
-    ));
-    s
+    // One serializer for every host (legibility_dom::json). Two would mean the cross-target
+    // determinism gate fails on a field-ordering difference rather than on anything real.
+    legibility_dom::json::extraction_json(&arena, &out, hit, url)
 }
 
-/// Serialize the comment thread, including how complete it is.
-///
-/// `completeness` is the point. Reddit's "load more", Discourse's lazy scroll and Hacker News's
-/// pagination all mean the HTML holds only part of the thread, and a caller shown 20 of 400 items
-/// with no indication would reasonably believe it had all of them.
-fn comments_json(set: &legibility_core::CommentSet) -> String {
-    let items: Vec<String> = set
-        .items
-        .iter()
-        .map(|it| {
-            format!(
-                "{{\"author\":{},\"timestamp\":{},\"depth\":{},\"parent\":{},\
-                 \"permalink\":{},\"deleted\":{},\"text\":{}}}",
-                it.author.as_ref().map_or("null".to_string(), |a| json_string(a)),
-                it.timestamp.as_ref().map_or("null".to_string(), |t| json_string(t)),
-                it.depth,
-                it.parent.map_or("null".to_string(), |p| p.to_string()),
-                it.permalink.as_ref().map_or("null".to_string(), |p| json_string(p)),
-                it.flags.deleted,
-                json_string(&it.text)
-            )
-        })
-        .collect();
-    let c = &set.completeness;
-    let continuation = format!(
-        "[{}]",
-        c.continuation.iter().map(|u| json_string(u)).collect::<Vec<_>>().join(",")
-    );
-    format!(
-        "{{\"count\":{},\"depth_source\":{},\"completeness\":{{\"present\":{},\
-         \"claimed_total\":{},\"truncated\":{},\"reason\":{},\"continuation\":{}}},\"items\":[{}]}}",
-        set.items.len(),
-        set.depth_source.map_or("null".to_string(), |d| json_string(&format!("{d:?}"))),
-        c.present,
-        c.claimed_total.map_or("null".to_string(), |v| v.to_string()),
-        c.truncated,
-        c.reason.map_or("null".to_string(), |r| json_string(&format!("{r:?}"))),
-        continuation,
-        items.join(",")
-    )
-}
 
-/// Serialize metadata with its provenance intact.
-///
-/// Every field carries `source`, `confidence` and the `transforms` applied, because the point of
-/// the metadata subsystem is that a caller can see *why* a value looks the way it does and override
-/// it. Emitting bare strings would throw away the whole design.
-fn metadata_json(arena: &legibility_core::Arena, m: &legibility_core::Metadata) -> String {
-    let cand = |c: &legibility_core::meta::Candidate| {
-        let transforms: Vec<String> = c
-            .transforms
-            .iter()
-            .map(|t| json_string(&format!("{t:?}")))
-            .collect();
-        format!(
-            "{{\"value\":{},\"source\":{},\"confidence\":{},\"span\":[{},{}],\"transforms\":[{}],\"verbatim_ok\":{}}}",
-            json_string(&c.value),
-            json_string(c.source.as_str()),
-            c.confidence,
-            c.span_start,
-            c.span_end,
-            transforms.join(","),
-            c.verify_verbatim(arena)
-        )
-    };
-    let opt = |o: &Option<legibility_core::meta::Candidate>| match o {
-        Some(c) => cand(c),
-        None => "null".to_string(),
-    };
-    let date = |o: &Option<(legibility_core::meta::Candidate, legibility_core::meta::DateValue)>| match o {
-        Some((c, d)) => format!(
-            "{{\"candidate\":{},\"raw\":{},\"iso8601\":{},\"tz_known\":{}}}",
-            cand(c),
-            json_string(&d.raw),
-            d.iso8601.as_ref().map_or("null".to_string(), |v| json_string(v)),
-            d.tz_known
-        ),
-        None => "null".to_string(),
-    };
-    let authors: Vec<String> = m.authors.iter().map(cand).collect();
-    format!(
-        "{{\"title\":{},\"title_without_site_name\":{},\"authors\":[{}],\"published\":{},\
-         \"modified\":{},\"site_name\":{},\"language\":{},\"description\":{},\
-         \"canonical_url\":{},\"candidate_count\":{}}}",
-        opt(&m.title),
-        opt(&m.title_without_site_name),
-        authors.join(","),
-        date(&m.published),
-        date(&m.modified),
-        opt(&m.site_name),
-        opt(&m.language),
-        opt(&m.description),
-        opt(&m.canonical_url),
-        m.alternatives.len()
-    )
-}
-
-fn limits_json(hit: LimitsHit) -> String {
-    let mut v = Vec::new();
-    for (name, on) in [
-        ("input_bytes", hit.input_bytes),
-        ("nodes", hit.nodes),
-        ("depth", hit.depth),
-        ("attrs_per_node", hit.attrs_per_node),
-        ("attr_bytes", hit.attr_bytes),
-        ("output_bytes", hit.output_bytes),
-    ] {
-        if on {
-            v.push(json_string(name));
-        }
-    }
-    format!("[{}]", v.join(","))
-}
-
-/// Highest-scoring container under the M0 placeholder scorer.
-///
-/// `<body>` is deliberately not a candidate: selecting it is the silent fallback that defect 1
-/// exists to remove, and allowing it here would hide exactly the failures worth seeing.
-#[allow(dead_code)]
-pub fn best_region(arena: &Arena) -> Option<NodeId> {
-    let mut best: Option<((core::cmp::Reverse<u16>, u32), NodeId)> = None;
-    for i in 0..arena.len() {
-        if arena.kind.get(i).copied() != Some(NodeKind::Element) {
-            continue;
-        }
-        let tag = arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN);
-        if !matches!(
-            tag,
-            TagId::DIV | TagId::ARTICLE | TagId::MAIN | TagId::SECTION | TagId::TD | TagId::LI
-        ) {
-            continue;
-        }
-        let id = NodeId(i as u32);
-        let score = arena.placeholder_evidence(id);
-        if score <= 0.0 {
-            continue;
-        }
-        let key = legibility_core::num::rank_key(score / 64.0, i as u32);
-        if best.as_ref().is_none_or(|(bk, _)| key < *bk) {
-            best = Some((key, id));
-        }
-    }
-    best.map(|(_, id)| id)
-}
-
-/// Prose-only text of a subtree, whitespace collapsed.
-pub fn prose_text(arena: &Arena, region: NodeId) -> String {
-    let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
-    let mut out = String::new();
-    for i in region.idx()..end {
-        if arena.kind.get(i).copied() != Some(NodeKind::Text) {
-            continue;
-        }
-        if arena.text_role.get(i).copied().is_none_or(|r| !r.is_prose()) {
-            continue;
-        }
-        for word in arena.own_text(NodeId(i as u32)).split_whitespace() {
-            if !out.is_empty() {
-                out.push(' ');
-            }
-            out.push_str(word);
-        }
-    }
-    out
-}
 
 /// Extract a string field from a flat JSON object.
 fn json_field(body: &str, key: &str) -> Option<String> {
@@ -406,26 +180,55 @@ fn json_field(body: &str, key: &str) -> Option<String> {
         return None;
     }
     let mut out = String::new();
-    let mut escaped = false;
-    for c in rest.get(open_idx + 1..)?.chars() {
-        if escaped {
-            match c {
+    let mut chars = rest.get(open_idx + 1..)?.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
                 'n' => out.push('\n'),
                 'r' => out.push('\r'),
                 't' => out.push('\t'),
-                'u' => out.push('\u{fffd}'), // demo input: no \u decoding needed
+                'b' => out.push('\u{8}'),
+                'f' => out.push('\u{c}'),
+                'u' => {
+                    // Proper \uXXXX decoding, surrogate pairs included.
+                    //
+                    // This used to push U+FFFD and move on, with a comment claiming the demo never
+                    // needed it. The browser hid the mistake: JSON.stringify emits raw UTF-8, so
+                    // pasted Korean arrived intact. Any client that escapes non-ASCII -- Python's
+                    // json.dumps does by default, and so do many HTTP libraries -- had every
+                    // non-Latin character replaced and its four hex digits left behind as text.
+                    let hi = take_hex4(&mut chars)?;
+                    let cp = if (0xD800..0xDC00).contains(&hi) {
+                        // High surrogate: a low surrogate must follow, as \uXXXX again.
+                        if chars.next()? != '\\' || chars.next()? != 'u' {
+                            return None;
+                        }
+                        let lo = take_hex4(&mut chars)?;
+                        if !(0xDC00..0xE000).contains(&lo) {
+                            return None;
+                        }
+                        0x1_0000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
+                    } else {
+                        hi
+                    };
+                    out.push(char::from_u32(cp).unwrap_or('\u{fffd}'));
+                }
                 other => out.push(other),
-            }
-            escaped = false;
-        } else if c == '\\' {
-            escaped = true;
-        } else if c == '"' {
-            return Some(out);
-        } else {
-            out.push(c);
+            },
+            c => out.push(c),
         }
     }
     None
+}
+
+/// Read exactly four hex digits.
+fn take_hex4(chars: &mut core::iter::Peekable<core::str::Chars<'_>>) -> Option<u32> {
+    let mut v = 0u32;
+    for _ in 0..4 {
+        v = v * 16 + chars.next()?.to_digit(16)?;
+    }
+    Some(v)
 }
 
 fn json_string(s: &str) -> String {
@@ -464,6 +267,29 @@ mod tests {
         assert_eq!(json_field(r#"{"html":"a\"b"}"#, "html").as_deref(), Some("a\"b"));
         assert_eq!(json_field(r#"{"html":"a\nb"}"#, "html").as_deref(), Some("a\nb"));
         assert_eq!(json_field(r#"{"other":1}"#, "html"), None);
+    }
+
+    #[test]
+    fn unicode_escapes_survive_including_korean_and_surrogate_pairs() {
+        // The browser hid this: JSON.stringify emits raw UTF-8, so pasted Korean always worked.
+        // Python's json.dumps escapes non-ASCII by default, and every such character was being
+        // replaced with U+FFFD while its four hex digits stayed behind as literal text.
+        assert_eq!(
+            json_field(r#"{"html":"\ud55c\uad6d\uc5b4"}"#, "html").as_deref(),
+            Some("한국어")
+        );
+        // Astral plane, as a surrogate pair.
+        assert_eq!(
+            json_field(r#"{"html":"\ud83d\ude00"}"#, "html").as_deref(),
+            Some("\u{1f600}")
+        );
+        // Mixed with ordinary text and other escapes.
+        assert_eq!(
+            json_field(r#"{"html":"<p>\ud55c\n\uae00</p>"}"#, "html").as_deref(),
+            Some("<p>한\n글</p>")
+        );
+        // A lone high surrogate is malformed input, not something to guess at.
+        assert_eq!(json_field(r#"{"html":"\ud83d"}"#, "html"), None);
     }
 
     #[test]

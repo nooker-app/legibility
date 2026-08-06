@@ -138,93 +138,9 @@ fn prose_text(arena: &Arena, region: NodeId) -> String {
     out
 }
 
-/// Hand-written canonical JSON.
-///
-/// No serde. `schema_version` and key order are part of the determinism contract — S3 compares
-/// `blake3` of this output across native, wasip1 and headless Chrome — and a derive macro would
-/// put that contract at the mercy of a dependency's field ordering.
+/// Serialize through the shared serializer so `lgb extract`, `lgb serve` and the WASM module all
+/// emit identical bytes -- the cross-target determinism gate compares them.
 fn to_json(arena: &Arena, hit: LimitsHit) -> String {
-    let sel = legibility_core::select_article(arena);
-    let region = sel.article;
-    let mut s = String::from("{\"schema_version\":1,\"article\":");
-    match region {
-        Some(n) => {
-            let text = prose_text(arena, n).trim_end().to_string();
-            s.push_str("{\"text\":");
-            push_json_string(&mut s, &text);
-            s.push_str(",\"prose_len\":");
-            s.push_str(&arena.prose_len.get(n.idx()).copied().unwrap_or(0).to_string());
-            s.push_str(",\"tag\":");
-            push_json_string(
-                &mut s,
-                arena.tag.get(n.idx()).copied().and_then(TagId::known_name).unwrap_or("?"),
-            );
-            // `calibrated` is false permanently in v1, not pending. Calibration needs a labelled
-            // corpus; claiming it without one would be worse than admitting its absence.
-            s.push_str(&format!(",\"confidence\":{}", sel.confidence));
-            s.push_str(",\"calibrated\":false}");
-        }
-        None => s.push_str("null"),
-    }
-    if let Some(r) = sel.no_article {
-        s.push_str(",\"no_article\":");
-        push_json_string(&mut s, &format!("{r:?}"));
-    }
-    // Present-and-empty from day one. A key that appears in a later version is a schema break
-    // for every consumer that already shipped against its absence.
-    s.push_str(",\"comments\":{\"count\":0,\"items\":[]}");
-    s.push_str(",\"diagnostics\":{\"limits_hit\":[");
-    let mut first = true;
-    for (name, on) in [
-        ("input_bytes", hit.input_bytes),
-        ("nodes", hit.nodes),
-        ("depth", hit.depth),
-        ("attrs_per_node", hit.attrs_per_node),
-        ("attr_bytes", hit.attr_bytes),
-        ("comment_items", hit.comment_items),
-        ("output_bytes", hit.output_bytes),
-        ("step_budget", hit.step_budget),
-    ] {
-        if on {
-            if !first {
-                s.push(',');
-            }
-            push_json_string(&mut s, name);
-            first = false;
-        }
-    }
-    s.push_str("],\"node_count\":");
-    s.push_str(&arena.len().to_string());
-    s.push_str(",\"page_prose_len\":");
-    s.push_str(&arena.prose_len.first().copied().unwrap_or(0).to_string());
-    s.push_str(",\"page_control_len\":");
-    s.push_str(&arena.control_len.first().copied().unwrap_or(0).to_string());
-    s.push_str(",\"page_hidden_len\":");
-    s.push_str(&arena.hidden_len.first().copied().unwrap_or(0).to_string());
-    s.push_str(",\"page_alt_len\":");
-    s.push_str(&arena.alt_len.first().copied().unwrap_or(0).to_string());
-    s.push_str("}}");
-    s
-}
-
-fn push_json_string(out: &mut String, s: &str) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                out.push_str("\\u");
-                for shift in [12, 8, 4, 0] {
-                    let nibble = ((c as u32) >> shift) & 0xF;
-                    out.push(char::from_digit(nibble, 16).unwrap_or('0'));
-                }
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
+    let out = legibility_core::extract_all(arena, Limits::DEFAULT);
+    legibility_dom::json::extraction_json(arena, &out, hit, None)
 }

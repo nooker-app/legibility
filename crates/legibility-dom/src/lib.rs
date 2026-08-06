@@ -17,6 +17,7 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+pub mod json;
 pub mod serialize;
 
 use std::cell::{Ref, RefCell};

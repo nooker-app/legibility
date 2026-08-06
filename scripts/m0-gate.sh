@@ -16,7 +16,7 @@ chk "iOS reachability: aarch64-apple-ios"        "cargo build -q --release -p le
 chk "iOS reachability: aarch64-apple-ios-sim"    "cargo build -q --release -p legibility-core --target aarch64-apple-ios-sim"
 chk "no direct recursion in core"                "python3 scripts/check-no-recursion.py"
 chk "no third-party .html committed (D9)"        "[ \"\$(git ls-files corpus/ | grep -c '\\.html\$')\" = 0 ]"
-chk "no unwrapped extern \"C\" (S1/§1.11.2)"       "[ \"\$(grep -rn 'no_mangle' crates/ | wc -l | tr -d ' ')\" = 0 ]"
+chk "extern \"C\" bodies wrapped (S1/§1.11.2)"     "python3 scripts/ffi-audit.py"
 chk "corpus submodule pinned to expected SHA"    "[ \"\$(git -C corpus/readability rev-parse HEAD)\" = ab4027a8b37669745016869a37a504727992b2ba ]"
 chk "tier_a case count matches manifest"         "[ \"\$(ls corpus/readability/test/test-pages | wc -l | tr -d ' ')\" = 130 ]"
 

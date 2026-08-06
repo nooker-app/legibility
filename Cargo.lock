@@ -99,6 +99,8 @@ name = "legibility-wasm"
 version = "0.0.0"
 dependencies = [
  "legibility-core",
+ "legibility-dom",
+ "legibility-sanitize",
 ]
 
 [[package]]

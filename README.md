@@ -23,6 +23,32 @@ itself is built around four things Readability.js structurally cannot do:
    single reverse pass for all subtree sums — which removes the quadratic inner-text
    recomputation. No document cloning, no retry ladder.
 
+## Try it
+
+Two demos, because one of them cannot do what the other can.
+
+**Offline, single file, no server.** The WebAssembly module is embedded in the HTML as base64, so it
+runs from `file://` — double-click it, mail it, use it on a plane.
+
+```sh
+python3 scripts/build-offline-demo.py     # -> js/testbed/legibility-offline.html
+open js/testbed/legibility-offline.html
+```
+
+Paste HTML or drop a `.html` file. There is **no URL input**: a page opened from disk cannot fetch a
+third-party site, because CORS forbids it and no client-side code changes that. Verify the offline
+claim rather than taking it — `scripts/verify-offline-demo.sh` loads the file in headless Chrome from
+`file://` and asserts the extraction is correct.
+
+**Local server, with URL fetching.** The fetch happens server-side, where CORS does not apply.
+
+```sh
+cargo run --release -p legibility-cli -- serve   # http://127.0.0.1:8080
+```
+
+Both go through the same serializer (`legibility_dom::json`), so their output is byte-identical to
+`lgb extract` — the determinism gate compares them.
+
 ## Status
 
 Pre-alpha. M0 (skeleton, disciplines, probes) is in progress; nothing here extracts anything

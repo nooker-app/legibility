@@ -20,3 +20,4 @@ js/testbed/pkg/
 # Claude Code transient session state (project-level config under .claude/ IS tracked).
 .claude/scheduled_tasks.lock
 .claude/**/*.lock
+js/testbed/legibility-offline.html

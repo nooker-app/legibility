@@ -1,0 +1,328 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>legibility — offline demo</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --dim: #8888; --ok: #2f6f4f; --bad: #c33; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 ui-sans-serif, -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  header { padding: .9rem 1.2rem; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 1rem; margin: 0 0 .2rem; }
+  .note { color: var(--dim); font-size: .8rem; }
+  main { display: grid; grid-template-columns: minmax(20rem, 4fr) minmax(24rem, 6fr); min-height: calc(100vh - 5rem); }
+  @media (max-width: 62rem) { main { grid-template-columns: 1fr; } }
+  .pane { padding: 1rem 1.2rem; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  @media (max-width: 62rem) { .pane + .pane { border-left: 0; border-top: 1px solid var(--line); } }
+  h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 1.3rem 0 .4rem; }
+  h2:first-of-type { margin-top: 0; }
+  button { font: inherit; padding: .4rem .9rem; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+  button.go { background: var(--ok); color: #fff; border-color: transparent; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  textarea { width: 100%; min-height: 14rem; font: .78rem/1.5 ui-monospace, monospace; padding: .5rem .6rem;
+             border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; resize: vertical; }
+  .row { display: flex; gap: .5rem; align-items: center; margin: .6rem 0; flex-wrap: wrap; }
+  #drop { border: 1.5px dashed var(--line); border-radius: 6px; padding: .8rem; text-align: center; color: var(--dim); font-size: .82rem; }
+  #drop.over { border-color: var(--ok); color: var(--ok); }
+  #article { border-left: 3px solid var(--ok); padding-left: 1rem; overflow-wrap: break-word; }
+  #article img { max-width: 100%; height: auto; }
+  #article pre { overflow-x: auto; background: #8881; padding: .6rem; border-radius: 4px; }
+  #article table { display: block; overflow-x: auto; border-collapse: collapse; }
+  #article td, #article th { border: 1px solid var(--line); padding: .3rem .5rem; }
+  table.stats { border-collapse: collapse; width: 100%; font-size: .84rem; }
+  table.stats td { padding: .2rem .4rem; vertical-align: top; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { display: inline-block; height: .75rem; border-radius: 2px; }
+  .barcell { width: 50%; }
+  pre.json { font: .72rem/1.4 ui-monospace, monospace; overflow: auto; background: #8881; padding: .6rem; border-radius: 4px; max-height: 20rem; }
+  .err { color: var(--bad); white-space: pre-wrap; }
+  .pill { display: inline-block; font-size: .7rem; padding: .1rem .45rem; border: 1px solid var(--line); border-radius: 99px; color: var(--dim); }
+  ol.comments { list-style: none; padding: 0; margin: 0; font-size: .88rem; }
+  ol.comments li { border-left: 2px solid var(--line); padding: .35rem 0 .35rem .7rem; margin: .3rem 0; }
+  .cmeta { color: var(--dim); font-size: .74rem; }
+  .warn { color: #b80; }
+</style>
+
+<header>
+  <h1>legibility <span class="pill" id="stage">offline · single file</span></h1>
+  <p class="note">Runs entirely in this page. No server, no network — the WebAssembly module is
+    embedded in the file, so it works from <code>file://</code> and on a plane.
+    <strong>URL input is not available here</strong>: a page opened from disk cannot fetch a
+    third-party site (CORS forbids it, and no client-side code changes that). Use
+    <code>lgb serve</code> for URL fetching, or paste the page source below —
+    <em>View Source → select all → copy</em>.</p>
+</header>
+
+<main>
+  <section class="pane">
+    <h2>Input</h2>
+    <textarea id="html" spellcheck="false" placeholder="Paste HTML here, or drop a .html file below"></textarea>
+    <div id="drop">drop a <code>.html</code> file</div>
+    <div class="row">
+      <button class="go" id="go">Extract</button>
+      <button id="sample">Load sample</button>
+      <span class="note" id="timing"></span>
+    </div>
+
+    <h2>Where the page's text went</h2>
+    <table class="stats" id="roles"><tr><td class="note" colspan="4">no result yet</td></tr></table>
+    <p class="note">Only <strong>prose</strong> reaches any statistic. Readability counts all of it,
+      which is why icon ligatures, “copy code” labels and <code>hidden</code> blocks distort its
+      scores. <code>alt</code> is screen-reader text: kept out of the reader view, but preserved
+      rather than deleted.</p>
+
+    <h2>Engine</h2>
+    <table class="stats" id="engine"><tr><td class="note">—</td></tr></table>
+  </section>
+
+  <section class="pane">
+    <h2>Article <span class="note" id="ameta"></span></h2>
+    <div id="article"><p class="note">Paste HTML and press Extract.</p></div>
+
+    <h2>Metadata</h2>
+    <table class="stats" id="metadata"><tr><td class="note" colspan="3">—</td></tr></table>
+
+    <h2>Comments <span class="note" id="cmeta"></span></h2>
+    <div id="comments"><p class="note">—</p></div>
+
+    <h2>Raw output</h2>
+    <pre class="json" id="json">—</pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------------------------
+// The module, embedded. See scripts/build-offline-demo.py -- a fetch() for a sibling .wasm is
+// blocked by CORS on file://, so the bytes live here.
+// ---------------------------------------------------------------------------------------------
+const WASM_BASE64 = "/*__WASM_BASE64__*/";
+
+const $ = (id) => document.getElementById(id);
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Forty lines of glue over four exports, rather than wasm-bindgen: its generated JS wants to load
+// the module itself and is version-coupled to the CLI that produced it.
+let wasm = null;
+
+async function initWasm() {
+  const bytes = b64ToBytes(WASM_BASE64);
+  // instantiate, not instantiateStreaming: there is no Response to stream from, and this path also
+  // sidesteps servers that mislabel .wasm as application/octet-stream.
+  const { instance } = await WebAssembly.instantiate(bytes, {});
+  wasm = instance.exports;
+  const v = wasm.lgb_schema_version();
+  $("engine").innerHTML =
+    `<tr><td>module</td><td class="num">${(bytes.length / 1024).toFixed(0)} KB</td></tr>` +
+    `<tr><td>schema</td><td class="num">v${v}</td></tr>` +
+    `<tr><td>network</td><td>never contacted</td></tr>`;
+}
+
+function extract(html) {
+  const enc = new TextEncoder().encode(html);
+  const ptr = wasm.lgb_alloc(enc.length);
+  if (ptr === 0) throw new Error("allocation failed (page too large for the browser limits)");
+  new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
+
+  const res = wasm.lgb_extract(ptr, enc.length);
+  if (res === 0) throw new Error("extraction returned no result");
+  // 4-byte little-endian length, then UTF-8 JSON.
+  const lenView = new DataView(wasm.memory.buffer, res, 4);
+  const len = lenView.getUint32(0, true);
+  const jsonBytes = new Uint8Array(wasm.memory.buffer, res + 4, len);
+  const json = new TextDecoder("utf-8").decode(jsonBytes);
+  wasm.lgb_free_result();
+  return JSON.parse(json);
+}
+
+const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a" };
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function run() {
+  const html = $("html").value;
+  if (!html.trim()) { $("article").innerHTML = '<p class="note">Nothing to extract.</p>'; return; }
+  $("go").disabled = true;
+  try {
+    const t0 = performance.now();
+    const data = extract(html);
+    const ms = performance.now() - t0;
+    $("timing").textContent =
+      `${ms.toFixed(1)} ms for ${(new Blob([html]).size / 1024).toFixed(0)} KB`;
+    render(data);
+  } catch (e) {
+    $("article").innerHTML = `<p class="err">${esc(e.message || e)}</p>`;
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function render(d) {
+  $("json").textContent = JSON.stringify(d, null, 2);
+
+  const a = d.article;
+  if (a) {
+    // Injected as HTML on purpose: the engine owns sanitization, and if anything executable ever
+    // lands here that is a sanitizer bug worth seeing rather than hiding behind textContent.
+    $("article").innerHTML = a.html || '<p class="note">(empty)</p>';
+    $("ameta").textContent =
+      `<${a.tag}> · ${a.prose_len} B prose · confidence ${a.confidence}/10000` +
+      ` · ${a.dropped_subtrees} subtrees dropped` +
+      (a.truncated ? " · TRUNCATED" : "") + ` · calibrated ${a.calibrated}`;
+  } else {
+    $("article").innerHTML =
+      `<p class="err">no article — ${esc(d.no_article || "?")}</p>` +
+      (d.page_kind === "listing"
+        ? '<p class="note">Classified as a listing: its text is dominated by a repeated template whose items have no author or timestamp.</p>'
+        : "");
+    $("ameta").textContent = "";
+  }
+
+  renderRoles(d.diagnostics);
+  renderMetadata(d.metadata);
+  renderComments(d.comments);
+
+  const eng = $("engine");
+  eng.innerHTML += `<tr><td>page kind</td><td>${esc(d.page_kind)}</td></tr>` +
+    `<tr><td>repeated groups</td><td class="num">${d.group_count}</td></tr>` +
+    (d.comment_mask_reverted
+      ? '<tr><td class="warn">mask reverted</td><td class="warn">masking left no article, so it was undone</td></tr>'
+      : "");
+}
+
+function renderRoles(g) {
+  if (!g) return;
+  const parts = [
+    ["prose", g.page_prose_len | 0],
+    ["control", g.page_control_len | 0],
+    ["hidden", g.page_hidden_len | 0],
+    ["alt (sr-only)", g.page_alt_len | 0],
+  ];
+  const total = Math.max(1, parts.reduce((s, [, v]) => s + v, 0));
+  $("roles").innerHTML = parts.map(([n, v]) => {
+    const pct = (v * 100 / total).toFixed(1);
+    return `<tr><td>${n}</td><td class="num">${v}</td>` +
+      `<td class="barcell"><span class="bar" style="width:${pct}%;background:${COLORS[n.split(" ")[0]]}"></span></td>` +
+      `<td class="num">${pct}%</td></tr>`;
+  }).join("") +
+    `<tr><td class="note">nodes</td><td class="num note">${g.node_count | 0}</td>` +
+    `<td class="note" colspan="2">${(g.limits_hit || []).length ? "limits: " + g.limits_hit.join(", ") : ""}</td></tr>`;
+}
+
+const META_ROWS = [
+  ["title", (m) => m.title],
+  ["title (site name off)", (m) => m.title_without_site_name],
+  ["published", (m) => m.published && m.published.candidate],
+  ["site name", (m) => m.site_name],
+  ["language", (m) => m.language],
+  ["canonical url", (m) => m.canonical_url],
+];
+
+function renderMetadata(m) {
+  if (!m) { $("metadata").innerHTML = '<tr><td class="note" colspan="3">—</td></tr>'; return; }
+  const rows = META_ROWS.map(([label, get]) => metaRow(label, get(m)));
+  (m.authors || []).forEach((a, i) => rows.push(metaRow(`author ${i + 1}`, a)));
+  if (m.published) {
+    rows.push(`<tr><td class="note">tz known</td><td class="note" colspan="2">${m.published.tz_known}` +
+      `${m.published.tz_known ? "" : " — no offset in the source, so none is assumed"}</td></tr>`);
+  }
+  $("metadata").innerHTML = rows.join("");
+}
+
+function metaRow(label, c) {
+  if (!c) return `<tr><td class="note">${esc(label)}</td><td class="note" colspan="2">absent</td></tr>`;
+  const style = c.verbatim_ok ? "" : ' style="color:var(--bad)"';
+  return `<tr><td>${esc(label)}</td><td>${esc(c.value)}</td>` +
+    `<td class="note"${style}>${esc(c.source)} · ${c.confidence}` +
+    `${c.verbatim_ok ? " · verbatim" : " · NOT VERBATIM"}</td></tr>`;
+}
+
+function renderComments(c) {
+  if (!c || !c.count) {
+    $("comments").innerHTML = '<p class="note">none found</p>';
+    $("cmeta").textContent = c ? "0" : "";
+    return;
+  }
+  const cc = c.completeness || {};
+  $("cmeta").textContent =
+    `${c.count} · depth from ${c.depth_source}` +
+    (cc.claimed_total != null ? ` · page claims ${cc.claimed_total}` : "") +
+    (cc.truncated ? ` · TRUNCATED (${cc.reason})` : " · complete");
+
+  $("comments").innerHTML = "<ol class=comments>" + c.items.map((it) => {
+    const indent = Math.min(it.depth, 8) * 0.9;
+    return `<li style="margin-left:${indent}rem">` +
+      `<div class="cmeta">${esc(it.author || "(no author)")}` +
+      `${it.timestamp ? " · " + esc(it.timestamp) : ""}` +
+      `${it.deleted ? ' · <span class="warn">deleted</span>' : ""}</div>` +
+      `<div>${esc(it.text)}</div></li>`;
+  }).join("") + "</ol>";
+}
+
+// A self-authored sample: no third-party HTML is shipped, which is also why the repository has no
+// corpus bytes in it (the history is public and permanent).
+const SAMPLE = `<!doctype html><html lang="ko"><head>
+<title>짧은 링크 포스트 | 예시 사이트</title>
+<meta property="og:title" content="짧은 링크 포스트">
+<meta property="og:site_name" content="예시 사이트">
+<meta name="author" content="김민지">
+<meta property="article:published_time" content="2026-08-06T09:00:00+09:00">
+<style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden}</style>
+</head><body>
+<nav><a href="/">홈</a><a href="/about">소개</a><a href="/blog">블로그</a></nav>
+<header><span class="sr-only">본문으로 건너뛰기</span><h1>짧은 링크 포스트</h1></header>
+<main><article>
+  <p>본문이 아주 짧습니다. Readability는 500자 임계값 때문에 이런 글에서 실패합니다.</p>
+  <pre><code class="language-rust">fn main() { println!("hi"); }</code></pre>
+  <button class="copy"><span class="material-icons" aria-hidden="true">content_copy</span><span>코드 복사</span></button>
+  <p>두 번째 문단입니다.</p>
+</article>
+<section class="comments"><h2>댓글 3</h2><ol>
+  <li class="c"><div><a class="author" href="/u/aaa">aaa</a> <time datetime="2026-08-06T10:00:00Z">10:00</time></div><p>첫 댓글입니다. 길이가 제각각인 사람 글입니다.</p></li>
+  <li class="c"><div><a class="author" href="/u/bbb">bbb</a> <time datetime="2026-08-06T11:00:00Z">11:00</time></div><p>두 번째. 조금 더 길게 써 보겠습니다. 문장이 이어집니다.</p></li>
+  <li class="c"><div><a class="author" href="/u/ccc">ccc</a> <time datetime="2026-08-06T12:00:00Z">12:00</time></div><p>세 번째 댓글.</p></li>
+</ol></section></main>
+<aside><a href="/1">관련 글 1</a><a href="/2">관련 글 2</a><a href="/3">관련 글 3</a></aside>
+<div hidden><p>숨겨진 프로모션 배너 텍스트가 아주 길게 반복됩니다 반복됩니다 반복됩니다</p></div>
+<footer><p>© 2026 예시 사이트</p></footer>
+<script>var tracking = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";<\/script>
+</body></html>`;
+
+$("go").onclick = run;
+$("sample").onclick = () => { $("html").value = SAMPLE; run(); };
+
+const drop = $("drop");
+for (const ev of ["dragenter", "dragover"]) {
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
+}
+for (const ev of ["dragleave", "drop"]) {
+  drop.addEventListener(ev, () => drop.classList.remove("over"));
+}
+drop.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  $("html").value = await f.text();
+  run();
+});
+
+// `#autorun` loads the sample and extracts as soon as the module is ready. It exists so headless
+// verification can assert the file really works from file:// with the network blocked -- claiming
+// "offline" without loading it in a browser would be an assertion rather than a fact.
+initWasm().then(() => {
+  if (location.hash === "#autorun") {
+    $("html").value = SAMPLE;
+    run();
+    document.title = "legibility — autorun done";
+  }
+}).catch((e) => {
+  $("article").innerHTML = `<p class="err">could not start the WebAssembly module: ${esc(e.message || e)}</p>`;
+  document.title = "legibility — autorun failed";
+});
+</script>
