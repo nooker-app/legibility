@@ -51,16 +51,21 @@ fn main() {
                     .and_then(|i| rest.get(i + 1))
                     .and_then(|n| n.parse().ok())
                     .unwrap_or(12usize);
-                match rest
+                let node = rest
                     .iter()
                     .position(|a| a == "--node")
                     .and_then(|i| rest.get(i + 1))
-                    .and_then(|n| n.parse::<u32>().ok())
-                {
+                    .and_then(|n| n.parse::<u32>().ok());
+                if rest.iter().any(|a| a == "--region") {
+                    // The candidate table says why *that* region won the page. This says what is
+                    // inside it, which is the separate question the shape rule answers.
+                    print!("{}", explain::region_map(&arena, Limits::DEFAULT, 1));
+                } else if let Some(n) = node {
                     // --node prints what a specific candidate actually holds, which is the next
                     // question after "why did that win".
-                    Some(n) => println!("{}", explain::node_text(&arena, NodeId(n))),
-                    None => print!("{}", explain::explain(&arena, Limits::DEFAULT, top)),
+                    println!("{}", explain::node_text(&arena, NodeId(n)));
+                } else {
+                    print!("{}", explain::explain(&arena, Limits::DEFAULT, top));
                 }
             }
             Err(e) => {
@@ -83,7 +88,7 @@ fn main() {
         "" => {
             eprintln!(
                 "usage: lgb <extract|text|explain|serve> [file|-] \
-                 [--port N] [--top N] [--node ID]"
+                 [--port N] [--top N] [--node ID] [--region]"
             );
             std::process::exit(2);
         }

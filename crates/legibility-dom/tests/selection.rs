@@ -445,3 +445,41 @@ fn indentation_between_tags_does_not_dilute_link_density() {
     assert_eq!(url, "https://github.com/free-news-api/news-api");
     assert_eq!(text, "", "a pointer must have an empty body, got: {text}");
 }
+
+#[test]
+fn comment_furniture_and_an_ad_do_not_become_the_submission_body() {
+    // Reconstructed from the page that took four rounds to diagnose. `<main>` is the accepted
+    // region, and it holds three things wider than the headline: a house ad, the empty comment
+    // section's own prose, and a wrapper <div> whose length is the sum of what is inside it. On
+    // the real page those measured 183, 147 and 190 bytes against a 108-byte title, so a link
+    // submission with no body at all was reported as having one.
+    //
+    // Two separate causes, both live here. The ad is outside the submission and was never the
+    // submission's business. The wrapper's prose is entirely comment-section prose that the
+    // extraction had already agreed to discard -- excluded subtrees are skipped by the scan but
+    // still counted in every ancestor's `prose_len`, and an ancestor is visited before the
+    // descendant it would have skipped.
+    let html = "<html><body><main>\
+        <shreddit-post permalink=\"/r/rss/comments/x/\">\
+          <div slot=\"credit-bar\"><a href=\"/r/rss/\">r/rss</a>\
+            <time datetime=\"2026-08-03T00:00:00Z\">2d ago</time>\
+            <a href=\"/user/rangeva/\">rangeva</a></div>\
+          <h1 slot=\"title\">Free news APIs differ in coverage and search filters</h1>\
+          <shreddit-post-text-body><div><div><p>\
+            <a href=\"https://github.com/free-news-api/news-api\">\
+            https://github.com/free-news-api/news-api</a></p></div></div>\
+          </shreddit-post-text-body>\
+        </shreddit-post>\
+        <shreddit-comments-page-ad><div>Sponsored. Ship faster with the tools that teams \
+          everywhere already trust for their day to day work.</div></shreddit-comments-page-ad>\
+        <div id=\"tree-wrapper\">\
+          <shreddit-comment-tree><section><h1>Comments Section</h1>\
+            <comment-forest-empty-state><p>Be the first to comment</p>\
+            <p>Nobody's responded to this post yet. Add your thoughts and get the conversation \
+            going.</p></comment-forest-empty-state></section></shreddit-comment-tree>\
+        </div></main></body></html>";
+    let (kind, url, text) = extract_shape(html);
+    assert_eq!(kind, "discussion-root", "a pointer was reported as an article: {text}");
+    assert_eq!(url, "https://github.com/free-news-api/news-api");
+    assert_eq!(text, "", "a link submission must not carry a body");
+}

@@ -131,18 +131,26 @@ pub fn decide(
     if !is_discussion {
         return None;
     }
-    let region_end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize)
-        .min(arena.len());
+    let region_end =
+        (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
     let title = submission_heading(arena, region, region_end)?;
     let title_prose = arena.prose_len.get(title.idx()).copied().unwrap_or(0);
     let title_end = arena.subtree_end.get(title.idx()).copied().unwrap_or(0) as usize;
+    // Look for the body inside the submission, not across the whole region. The region is
+    // whatever the scorer accepted -- on a Reddit post that is `<main>`, which also holds the
+    // comment furniture and the ad rail, and both of those are wide, pure, link-free prose that
+    // out-masses a headline. Measured on the real page: the empty comment section ("Be the first
+    // to comment. Nobody's responded to this post yet.") came to 190 bytes and the house ad to
+    // 183, against a 108-byte title, so a link submission with no body at all reported two
+    // separate bodies before the first one won.
+    let (start, end) = submission_container(arena, region, region_end, title);
 
     let mut body: Option<NodeId> = None;
     let mut body_prose = 0u32;
     let mut link: Option<NodeId> = None;
     let mut link_prose = 0u32;
-    let mut i = region.idx() + 1;
-    while i < region_end {
+    let mut i = start;
+    while i < end {
         let node = NodeId(i as u32);
         // Skip whole comment subtrees. Without this a reply's inner markdown block is a
         // perfectly good "body" and the widest one wins -- which is defect ③ arriving by a
@@ -158,8 +166,7 @@ pub fn decide(
         // The outbound link is the widest anchor anywhere in the submission. Including the
         // title's own anchors is deliberate: Hacker News puts the destination *on* the title,
         // and Reddit puts it in the body, and "widest" picks the right one in both.
-        if arena.tag.get(i).copied() == Some(TagId::A)
-            && arena.attr(node, AttrName::HREF).is_some()
+        if arena.tag.get(i).copied() == Some(TagId::A) && arena.attr(node, AttrName::HREF).is_some()
         {
             let n = arena.prose_len.get(i).copied().unwrap_or(0);
             if n > link_prose {
@@ -173,7 +180,7 @@ pub fn decide(
         let wraps_title = i < title.idx()
             && (arena.subtree_end.get(i).copied().unwrap_or(0) as usize) > title.idx();
         if !inside_title && !wraps_title && !is_heading(arena, node) {
-            let prose = arena.prose_len.get(i).copied().unwrap_or(0);
+            let prose = net_prose(arena, i, exclusions);
             if prose > body_prose && is_prose_block(arena, node) {
                 body_prose = prose;
                 body = Some(node);
@@ -244,6 +251,76 @@ fn is_prose_block(arena: &Arena, node: NodeId) -> bool {
     let purity = guarded_div(prose as f32, all as f32);
     let link_density = arena.link_density(node).clamp(0.0, 1.0);
     purity >= Candidate::MIN_PURITY && link_density <= Candidate::MAX_LINK_DENSITY
+}
+
+/// The part of `region` that holds the submission: the region's own child containing the title.
+///
+/// The region is chosen by the scorer to be generous — it is the block that best explains the
+/// page — so on a discussion page it routinely contains the comment section, the composer, the
+/// sort control and an ad slot alongside the post. Every one of those is prose a headline can
+/// lose to, and the shape rule's whole question is "does this submission say more than its own
+/// headline". Asking it of the region answers a different question.
+///
+/// Returns the whole region when the title is a direct child of it, which is the case where the
+/// region already *is* the submission and there is nothing tighter to narrow to.
+///
+/// This narrows only the *search*, never the extracted region — see the note on [`decide`] for
+/// why narrowing the output was tried and reverted.
+fn submission_container(
+    arena: &Arena,
+    region: NodeId,
+    region_end: usize,
+    title: NodeId,
+) -> (usize, usize) {
+    let whole = (region.idx() + 1, region_end);
+    let mut c = region.idx() + 1;
+    while c < region_end {
+        let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
+        if title.idx() >= c && title.idx() < child_end {
+            // The title being the child itself means the submission is spread across the region's
+            // children rather than gathered into one, so there is no container to narrow to.
+            return if c == title.idx() {
+                whole
+            } else {
+                (c, child_end.min(region_end))
+            };
+        }
+        c = child_end;
+    }
+    whole
+}
+
+/// Prose of `node`'s subtree with the excluded subtrees inside it subtracted.
+///
+/// The scan skips excluded subtrees, but skipping them does not stop their bytes from being
+/// counted in every ancestor's `prose_len` — an ancestor is visited before the descendant it
+/// would have skipped. On the page that prompted this, the `<div>` wrapping the comment tree
+/// scored 190 bytes of which all 190 were comment-section furniture, and it beat the title
+/// on prose that the extraction had already agreed to throw away.
+///
+/// Nested exclusions are subtracted once: a comment item inside an excluded section would
+/// otherwise be counted twice and drive the result negative.
+fn net_prose(arena: &Arena, node: usize, exclusions: &[NodeId]) -> u32 {
+    let total = arena.prose_len.get(node).copied().unwrap_or(0);
+    let end = arena.subtree_end.get(node).copied().unwrap_or(0) as usize;
+    let mut removed = 0u32;
+    for (k, ex) in exclusions.iter().enumerate() {
+        let e = ex.idx();
+        if e <= node || e >= end {
+            continue;
+        }
+        // Outermost only. `enumerate` rather than a sort because `exclusions` is short and the
+        // order it arrives in is not something this function should depend on.
+        let nested = exclusions.iter().enumerate().any(|(j, other)| {
+            j != k
+                && other.idx() < e
+                && (arena.subtree_end.get(other.idx()).copied().unwrap_or(0) as usize) > e
+        });
+        if !nested {
+            removed = removed.saturating_add(arena.prose_len.get(e).copied().unwrap_or(0));
+        }
+    }
+    total.saturating_sub(removed)
 }
 
 #[cfg(test)]

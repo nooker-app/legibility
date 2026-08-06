@@ -178,3 +178,78 @@ pub fn node_text(arena: &Arena, node: NodeId) -> String {
     }
     out
 }
+
+/// List the elements inside the accepted region, widest prose first.
+///
+/// The candidate table above answers "why that region". This answers the question that comes
+/// after it on a discussion page: *within* the region, which block did the shape rule think was
+/// the submission body? That decision is a comparison between two numbers -- the widest viable
+/// non-title block against the title itself -- and when it comes out wrong there is no way to see
+/// which node supplied the winning number. Three rounds of diagnosis on one Reddit link post were
+/// spent guessing at it.
+///
+/// `wraps` marks an element that contains the heading, which the shape rule skips so that the
+/// submission container cannot be its own body.
+pub fn region_map(arena: &Arena, limits: Limits, min_prose: u32) -> String {
+    let out = legibility_core::extract_all(arena, limits);
+    let mut s = String::new();
+    let Some(region) = out.selection.article else {
+        s.push_str("no region accepted\n");
+        return s;
+    };
+    let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    let title = out.shape.as_ref().map(|sh| sh.title);
+    let title_end = title
+        .and_then(|t| arena.subtree_end.get(t.idx()).copied())
+        .unwrap_or(0) as usize;
+
+    s.push_str(&format!(
+        "region {} <{}>  prose {}B  ·  shape {}  ·  title {}\n",
+        region.0,
+        arena.tag_name(region).unwrap_or("?"),
+        arena.prose_len.get(region.idx()).copied().unwrap_or(0),
+        out.shape.as_ref().map_or("none", |sh| sh.kind.name()),
+        title.map_or_else(|| "none".to_string(), |t| t.0.to_string()),
+    ));
+    s.push_str("\n  node    tag              prose   link  link_d  purity  where\n");
+
+    let mut rows: Vec<(u32, usize)> = (region.idx() + 1..end)
+        .filter(|&i| arena.kind.get(i).copied() == Some(legibility_core::NodeKind::Element))
+        .map(|i| (arena.prose_len.get(i).copied().unwrap_or(0), i))
+        .filter(|&(p, _)| p >= min_prose)
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+
+    for (prose, i) in rows.into_iter().take(40) {
+        let link = arena.link_prose_len.get(i).copied().unwrap_or(0);
+        let control = arena.control_len.get(i).copied().unwrap_or(0);
+        let hidden = arena.hidden_len.get(i).copied().unwrap_or(0);
+        let alt = arena.alt_len.get(i).copied().unwrap_or(0);
+        let denom = f64::from(prose + control + hidden + alt);
+        let purity = if denom == 0.0 {
+            0.0
+        } else {
+            f64::from(prose) / denom
+        };
+        let link_d = if prose == 0 {
+            0.0
+        } else {
+            f64::from(link) / f64::from(prose)
+        };
+        let where_ = match title {
+            Some(t) if i >= t.idx() && i < title_end => "in-title",
+            Some(t)
+                if i < t.idx()
+                    && (arena.subtree_end.get(i).copied().unwrap_or(0) as usize) > t.idx() =>
+            {
+                "wraps"
+            }
+            _ => "",
+        };
+        s.push_str(&format!(
+            "  {i:<7} {:<14} {prose:>6} {link:>6}  {link_d:>5.2}  {purity:>5.2}  {where_}\n",
+            arena.tag_name(NodeId(i as u32)).unwrap_or("?"),
+        ));
+    }
+    s
+}
