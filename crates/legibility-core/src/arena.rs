@@ -8,15 +8,21 @@
 //! true — the arena is immutable during scoring, so there is no reason to clone a document
 //! to try different parameters, which is exactly what Readability.js's retry ladder does.
 //!
-//! # Why four length columns rather than one
+//! # Why five length columns rather than one
 //!
-//! `prose_len`, `control_len`, `hidden_len` and `alt_len` are separate (plan §1.10.1). A
-//! single `text_len` column is the bug: icon-font ligature text (`content_copy`), "copy
-//! code" button labels and `aria-hidden` subtrees all inflate it, and every downstream
+//! `prose_len`, `control_len`, `hidden_len`, `alt_len` and `inert_len` are separate (plan
+//! §1.10.1). A single `text_len` column is the bug: icon-font ligature text (`content_copy`),
+//! "copy code" button labels and `aria-hidden` subtrees all inflate it, and every downstream
 //! statistic — link density, text density, the page-relative z-scores — is then computed on
 //! polluted lengths. Removing that text at serialization time is far too late; the region
 //! has already been chosen wrongly. So the split happens during the parse, and every
 //! feature reads `prose_len` only.
+//!
+//! `inert_len` was split back out of `hidden_len` after the plan was written, because lumping
+//! them together reproduced the same class of bug one level down: `purity` divides prose by
+//! *all* text, so a `<main>` holding an inlined 10 KB JavaScript bundle scored 0.04 and lost
+//! to a "Be the first to comment" banner. Script source is not text competing with the
+//! article; it is markup overhead. See [`crate::a11y::TextRole::Inert`].
 
 use alloc::vec::Vec;
 
@@ -196,10 +202,18 @@ pub struct Arena {
     pub prose_len: Vec<u32>,
     /// Bytes of `Control` text (button labels, icon ligatures) in this subtree.
     pub control_len: Vec<u32>,
-    /// Bytes of `Hidden` text in this subtree.
+    /// Bytes of `Hidden` text in this subtree — prose a reader cannot see, such as a
+    /// `display:none` promo block. Dilutes `purity`, which is what it is for.
     pub hidden_len: Vec<u32>,
     /// Bytes of `AltOnly` text (`sr-only` and friends) in this subtree.
     pub alt_len: Vec<u32>,
+    /// Bytes of [`TextRole::Inert`] non-text in this subtree: script and stylesheet source,
+    /// template contents, comments, doctype.
+    ///
+    /// Deliberately read by **no** feature. It is recorded so diagnostics can show where a
+    /// document's bytes went, and separated from `hidden_len` so that inlining a JS bundle
+    /// inside `<main>` cannot make `<main>` look impure.
+    pub inert_len: Vec<u32>,
     /// Bytes of `Prose` text inside `<a>` subtrees. Numerator of link density.
     pub link_prose_len: Vec<u32>,
     /// Count of descendant elements, including this node if it is one. Denominator of text density.
@@ -324,6 +338,11 @@ impl Arena {
                 TextRole::Control => add_at(&mut self.control_len, i, own),
                 TextRole::Hidden => add_at(&mut self.hidden_len, i, own),
                 TextRole::AltOnly => add_at(&mut self.alt_len, i, own),
+                // Its own column, read by no feature. Script and stylesheet source, template
+                // contents and comments are markup overhead rather than text; keeping them out
+                // of the other four columns is the whole point, and keeping them in *a* column
+                // means the bytes are still reportable instead of vanishing.
+                TextRole::Inert => add_at(&mut self.inert_len, i, own),
             }
 
             if self.kind.get(i).copied() == Some(NodeKind::Element) {
@@ -347,6 +366,7 @@ impl Arena {
                 &mut self.control_len,
                 &mut self.hidden_len,
                 &mut self.alt_len,
+                &mut self.inert_len,
                 &mut self.link_prose_len,
                 &mut self.element_count,
             ] {

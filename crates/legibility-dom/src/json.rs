@@ -56,6 +56,13 @@ pub fn extraction_json(
             s.push_str(if rep.truncated { "true" } else { "false" });
             s.push_str(",\"dispersion_floor\":");
             s.push_str(if out.selection.dispersion_floor_used { "true" } else { "false" });
+            // How the region was chosen, not just which one. "<main> said so" and "it won the
+            // statistics" are different claims and a caller weighing our answer needs to tell them
+            // apart -- as does anyone reading a bug report about the wrong region.
+            s.push_str(",\"from_semantic_anchor\":");
+            s.push_str(if out.selection.region_from_semantic_anchor { "true" } else { "false" });
+            s.push_str(",\"signal_conflict\":");
+            s.push_str(if out.selection.signal_conflict { "true" } else { "false" });
             // Permanently false in v1, and part of the contract rather than a TODO: calibrating a
             // confidence needs a labelled corpus, and claiming it without one is worse than
             // admitting its absence.
@@ -87,6 +94,10 @@ pub fn extraction_json(
         ("page_control_len", arena.control_len.first().copied().unwrap_or(0)),
         ("page_hidden_len", arena.hidden_len.first().copied().unwrap_or(0)),
         ("page_alt_len", arena.alt_len.first().copied().unwrap_or(0)),
+        // Reported but read by no feature: script/style source, template contents, comments.
+        // Split out of page_hidden_len because counting it as hidden *text* made any container
+        // that inlines a JS bundle look impure. See legibility_core::a11y::TextRole::Inert.
+        ("page_inert_len", arena.inert_len.first().copied().unwrap_or(0)),
     ] {
         s.push_str(",\"");
         s.push_str(k);

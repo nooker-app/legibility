@@ -249,6 +249,7 @@ impl BuildArena {
                     arena.control_len.push(0);
                     arena.hidden_len.push(0);
                     arena.alt_len.push(0);
+                    arena.inert_len.push(0);
                     arena.link_prose_len.push(0);
                     arena.element_count.push(0);
 
@@ -332,7 +333,9 @@ impl Build {
     /// opinions.
     fn classify(tag: TagId, attrs: &[Attribute]) -> (TextRole, Option<HiddenReason>) {
         if tag.is_non_rendered() {
-            return (TextRole::Hidden, Some(HiddenReason::NonRendered));
+            // Inert, not Hidden: these bytes are program or stylesheet source, and a length
+            // column that feeds `purity` must not see them. See a11y::TextRole::Inert.
+            return (TextRole::Inert, Some(HiddenReason::NonRendered));
         }
 
         let mut role = TextRole::Prose;
@@ -557,7 +560,7 @@ impl TreeSink for BuildArena {
         if let Some(n) = b.nodes.get_mut(id as usize) {
             n.text = range;
             // Comment text never renders, so it must not reach any statistic.
-            n.own_role = TextRole::Hidden;
+            n.own_role = TextRole::Inert;
             n.hidden_reason = Some(HiddenReason::NonRendered);
         }
         id
@@ -569,7 +572,7 @@ impl TreeSink for BuildArena {
         let range = b.push_text(&target, &self.limits);
         if let Some(n) = b.nodes.get_mut(id as usize) {
             n.text = range;
-            n.own_role = TextRole::Hidden;
+            n.own_role = TextRole::Inert;
             n.hidden_reason = Some(HiddenReason::NonRendered);
         }
         id
@@ -611,7 +614,7 @@ impl TreeSink for BuildArena {
         let range = b.push_text(&name, &self.limits);
         if let Some(n) = b.nodes.get_mut(id as usize) {
             n.text = range;
-            n.own_role = TextRole::Hidden;
+            n.own_role = TextRole::Inert;
             n.hidden_reason = Some(HiddenReason::NonRendered);
         }
         b.link_last(0, id, self.limits.max_depth);
@@ -625,9 +628,9 @@ impl TreeSink for BuildArena {
         }
         let frag = b.new_node(NodeKind::Element, (*EMPTY_NAME).clone(), &self.limits);
         if let Some(n) = b.nodes.get_mut(frag as usize) {
-            // Template contents never render. Marking the fragment Hidden means the whole
+            // Template contents never render. Marking the fragment Inert means the whole
             // subtree inherits it in flatten and none of it reaches a statistic.
-            n.own_role = TextRole::Hidden;
+            n.own_role = TextRole::Inert;
             n.hidden_reason = Some(HiddenReason::Template);
             n.tag = TagId::TEMPLATE;
         }
@@ -759,14 +762,30 @@ mod tests {
     }
 
     #[test]
-    fn script_and_style_text_never_reaches_prose() {
+    fn script_and_style_text_is_inert_not_hidden() {
+        // This test used to assert `hidden_len[body] > 0`, which was asserting a bug. Script and
+        // stylesheet source landing in `hidden_len` put it into purity's denominator, so a
+        // container holding an inlined bundle looked like a container padded with hidden text.
+        // Reddit inlines a ~10 KB module script inside <main>: purity 0.04, <main> disqualified.
         let (a, _) = parse(
             "<html><head><style>.x{color:red}</style></head>\
              <body><p>real</p><script>var evil='aaaaaaaaaaaaaaaa';</script></body></html>",
         );
         let body = a.tag.iter().position(|&t| t == TagId::BODY).unwrap();
         assert_eq!(prose_of(&a, body), 4, "only `real` counts; script text must not");
-        assert!(a.hidden_len[body] > 0, "script text is accounted as hidden, not discarded");
+        assert!(a.inert_len[body] > 0, "script text is accounted, in its own column");
+        assert_eq!(a.hidden_len[body], 0, "script text is not hidden *text*");
+
+        // The property that actually matters: purity is unmoved by inlined script bytes.
+        let purity = |i: usize| {
+            let p = a.prose_len[i] as f32;
+            p / (p + a.control_len[i] as f32 + a.hidden_len[i] as f32 + a.alt_len[i] as f32)
+        };
+        assert!(
+            (purity(body) - 1.0).abs() < f32::EPSILON,
+            "a body of pure prose plus a script is pure prose, got {}",
+            purity(body)
+        );
     }
 
     #[test]

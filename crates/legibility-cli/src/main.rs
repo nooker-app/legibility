@@ -5,6 +5,7 @@
 //! is not extraction quality; it is that `parse -> arena -> flatten -> accumulate -> score ->
 //! serialize` runs end to end and produces byte-identical output on every target.
 
+mod explain;
 mod serve;
 
 use std::io::Read;
@@ -41,6 +42,32 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        "explain" => match read_input(rest.first().map(String::as_str)) {
+            Ok(html) => {
+                let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+                let top = rest
+                    .iter()
+                    .position(|a| a == "--top")
+                    .and_then(|i| rest.get(i + 1))
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(12usize);
+                match rest
+                    .iter()
+                    .position(|a| a == "--node")
+                    .and_then(|i| rest.get(i + 1))
+                    .and_then(|n| n.parse::<u32>().ok())
+                {
+                    // --node prints what a specific candidate actually holds, which is the next
+                    // question after "why did that win".
+                    Some(n) => println!("{}", explain::node_text(&arena, NodeId(n))),
+                    None => print!("{}", explain::explain(&arena, Limits::DEFAULT, top)),
+                }
+            }
+            Err(e) => {
+                eprintln!("lgb: {e}");
+                std::process::exit(1);
+            }
+        },
         "serve" => {
             let port = rest
                 .iter()
@@ -54,7 +81,10 @@ fn main() {
             }
         }
         "" => {
-            eprintln!("usage: lgb <extract|text|serve> [file|-] [--port N]");
+            eprintln!(
+                "usage: lgb <extract|text|explain|serve> [file|-] \
+                 [--port N] [--top N] [--node ID]"
+            );
             std::process::exit(2);
         }
         other => {

@@ -125,7 +125,7 @@ $("go-url").onclick = () => run({ url: $("url").value });
 $("go-html").onclick = () => run({ html: $("html").value });
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") run({ url: $("url").value }); });
 
-const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a" };
+const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a", inert: "#4a4a4a" };
 
 async function run(payload) {
   for (const b of document.querySelectorAll("button.go")) b.disabled = true;
@@ -165,7 +165,21 @@ function render(data) {
       `<${a.tag}> · prose ${a.prose_len}B · dropped ${a.dropped_subtrees} subtrees` +
       `${a.truncated ? " · TRUNCATED" : ""} · calibrated ${a.calibrated}`;
   } else {
-    $("article").innerHTML = '<p class="err">no article accepted</p>';
+    // Show *why*. This used to print the bare phrase and drop data.no_article, which is the
+    // difference between "the page has no prose" and "every candidate was link-dense" -- two
+    // findings that send you to different places. Diagnosing a real page cost three wrong
+    // guesses because this line threw the answer away.
+    const why = {
+      NoTextContent: "no container held any prose (empty, error page, or script-rendered)",
+      IndexPage: "no candidate cleared the viability floor, or a listing dominates the page",
+      CommentsOnly: "the page is a discussion with no submission body",
+      LowConfidence: "a region was found but not confidently enough to return",
+    };
+    const r = data.no_article || "unknown";
+    $("article").innerHTML =
+      `<p class="err">no article — ${escapeHtml(r)}</p>` +
+      `<p class="note">${escapeHtml(why[r] || "no reason recorded, which is itself a bug")}</p>` +
+      `<p class="note">run <code>lgb explain</code> on this page for the candidate table</p>`;
     $("meta").textContent = "";
   }
 
@@ -175,6 +189,9 @@ function render(data) {
     ["control", d.page_control_len | 0],
     ["hidden", d.page_hidden_len | 0],
     ["alt (sr-only)", d.page_alt_len | 0],
+    // Script/style source and template contents. Shown because it is often most of a modern
+    // page's bytes, and separated because no statistic reads it.
+    ["inert (not counted)", d.page_inert_len | 0],
   ];
   const total = Math.max(1, parts.reduce((s, [, v]) => s + v, 0));
   $("roles").innerHTML = parts.map(([n, v]) => {

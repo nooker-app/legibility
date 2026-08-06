@@ -62,6 +62,30 @@ pub struct Candidate {
     pub evidence: f32,
 }
 
+impl Candidate {
+    /// Minimum share of a region's text that must be prose for it to be an article.
+    pub const MIN_PURITY: f32 = 0.5;
+    /// Maximum share of a region's prose that may sit inside links.
+    pub const MAX_LINK_DENSITY: f32 = 0.75;
+
+    /// Whether this region is eligible to be an article at all.
+    ///
+    /// Both tests are ratios, so neither reintroduces an absolute length. A region that is mostly
+    /// control labels or hidden prose is not an article, and neither is one that is mostly links —
+    /// however much text it holds.
+    ///
+    /// Applied to *candidacy*, not to the winner. Checking only the winner meant one bad argmax
+    /// discarded every other candidate and the page was reported as having no article at all.
+    ///
+    /// `purity`'s denominator excludes [`crate::a11y::TextRole::Inert`] bytes, so inlined script
+    /// and stylesheet source cannot fail a region here. That was a real bug: a `<main>` holding a
+    /// 10 KB JS bundle alongside 450 bytes of post scored 0.04.
+    #[must_use]
+    pub fn is_viable(&self) -> bool {
+        self.purity >= Self::MIN_PURITY && self.link_density <= Self::MAX_LINK_DENSITY
+    }
+}
+
 /// Minimum candidates before page-relative statistics mean anything.
 ///
 /// Below this, a z-score is computed from a sample too small to have a shape — print views, AMP
@@ -244,6 +268,66 @@ fn bucket_low_edge(idx: usize) -> f32 {
     }
 }
 
+/// Fraction of the statistical winner's prose that a semantic anchor must hold to be trusted.
+///
+/// From plan §M7's L0 rung: an anchor is the page author telling us where the article is, and that
+/// is usually better evidence than any statistic — but sites do put `<main>` around a nav shell.
+/// If the anchor holds less than this share of the best statistical region's prose, the two signals
+/// disagree badly enough that the anchor is not believed and `signal_conflict` is reported.
+const ANCHOR_MIN_PROSE_SHARE: f32 = 0.20;
+
+/// Whether an element declares itself the article region.
+///
+/// `<main>`/`<article>` by tag, or the ARIA equivalents. `role="document"` is included because
+/// reader-oriented pages use it for the same purpose.
+fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
+    if arena
+        .tag
+        .get(node.idx())
+        .copied()
+        .unwrap_or(TagId::UNKNOWN)
+        .is_positive_landmark()
+    {
+        return true;
+    }
+    match arena.attr(node, crate::arena::AttrName::ROLE) {
+        Some(r) => {
+            let r = r.trim();
+            ["main", "article", "document"].iter().any(|k| r.eq_ignore_ascii_case(k))
+        }
+        None => false,
+    }
+}
+
+/// The most specific semantic anchor among `viable`, if that is unambiguous.
+///
+/// "Most specific" is the anchor containing no other anchor, which needs no depth column: `A`
+/// contains `B` exactly when `B`'s index lies inside `A`'s subtree range.
+///
+/// - `<main>` alone → `<main>`.
+/// - `<main><article>…</article></main>` → `<article>`, the narrower claim.
+/// - ten `<article>` cards → **`None`**. Ten innermost anchors is a listing, not an article, and
+///   guessing between them is how a front page gets returned as a post.
+#[must_use]
+pub fn innermost_anchor(arena: &Arena, viable: &[&Candidate]) -> Option<NodeId> {
+    let anchors: Vec<NodeId> = viable
+        .iter()
+        .map(|c| c.node)
+        .filter(|&n| is_semantic_anchor(arena, n))
+        .collect();
+    let mut innermost = None;
+    for &a in &anchors {
+        if anchors.iter().any(|&b| b != a && contains(arena, a, b)) {
+            continue;
+        }
+        if innermost.is_some() {
+            return None; // ambiguous
+        }
+        innermost = Some(a);
+    }
+    innermost
+}
+
 /// The chosen region, or why there is none.
 #[derive(Debug, Clone, Copy)]
 pub struct Selection {
@@ -259,6 +343,12 @@ pub struct Selection {
     /// Set when the winner is a legitimate argmax that happens to be the outermost container,
     /// as distinct from a fallback. These are different facts and must not share a flag.
     pub region_is_outermost_by_argmax: bool,
+    /// Set when the region came from a semantic anchor (`<main>`, `<article>`, `role=main`)
+    /// rather than from the statistics alone.
+    pub region_from_semantic_anchor: bool,
+    /// Set when an anchor existed but held too little prose to be believed, so the statistics
+    /// were used instead. Worth surfacing: it usually means the page's markup is misleading.
+    pub signal_conflict: bool,
 }
 
 /// Select the article region.
@@ -295,16 +385,42 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
             confidence: 0,
             dispersion_floor_used: false,
             region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
+        };
+    }
+
+    // Disqualify unviable candidates *before* ranking, not after.
+    //
+    // This used to be a check on the winner: if the argmax failed the purity or link-density
+    // floor, the whole page was reported as having no article. That threw away every other
+    // candidate because one of them was bad. On a Reddit post it meant a single link-only
+    // `<div slot="text-body">` or an impure wrapper could sink a page that had a perfectly good
+    // region elsewhere. A floor describes what a region must be to *be* an article, so it belongs
+    // on candidacy; only the absence of any surviving candidate says something about the page.
+    let viable: Vec<&Candidate> = cands.iter().filter(|c| c.is_viable()).collect();
+    if viable.is_empty() {
+        // Every container was either mostly non-prose text or mostly links. That is the shape of
+        // an index page, and unlike the empty case above it is a positive finding.
+        return Selection {
+            article: None,
+            no_article: Some(NoArticle::IndexPage),
+            confidence: 0,
+            dispersion_floor_used: stats.competitors < MIN_COMPETITORS || stats.density_iqr <= 0.0,
+            region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
         };
     }
 
     // Rank by integer key so ties break by document order rather than by sort internals.
-    let mut ranked: Vec<(_, usize)> = cands
+    let mut ranked: Vec<(_, usize)> = viable
         .iter()
         .enumerate()
         .map(|(idx, c)| (rank_key(normalize(c.evidence), c.node.0), idx))
         .collect();
     ranked.sort_unstable();
+    let cands = viable;
 
     let Some(&(_, best_idx)) = ranked.first() else {
         return Selection {
@@ -313,6 +429,8 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
             confidence: 0,
             dispersion_floor_used: false,
             region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
         };
     };
     let Some(&best) = cands.get(best_idx) else {
@@ -322,6 +440,8 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
             confidence: 0,
             dispersion_floor_used: false,
             region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
         };
     };
 
@@ -348,28 +468,52 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
         conf = conf.min(0.6);
     }
 
-    // Purity floor is the one hard reject, and it is still relative: a region that is mostly
-    // control labels and hidden text is not an article regardless of size.
-    if best.purity < 0.5 || best.link_density > 0.75 {
-        return Selection {
-            article: None,
-            no_article: Some(NoArticle::IndexPage),
-            confidence: quantize(conf),
-            dispersion_floor_used: degenerate,
-            region_is_outermost_by_argmax: false,
-        };
+    // L0: a semantic anchor outranks the statistics, subject to cross-validation.
+    //
+    // Needed because `share x density` is a near-tie between very differently-sized regions: on a
+    // Reddit post `<main>` (28.5% of page prose) lost by 2% to the "Be the first to comment" empty
+    // state (8.7% of prose but 2.7x the density). Density prefers small tight leaves -- that is
+    // its known failure mode, documented at the top of this module -- and no amount of reweighting
+    // those two factors fixes a case where the author has already said which element is the
+    // article. M6 replaces the statistics wholesale; this rung stands on its own either way.
+    let mut from_anchor = false;
+    let mut conflict = false;
+    let mut chosen = best;
+    if let Some(anchor) = innermost_anchor(arena, &cands) {
+        if anchor == best.node {
+            from_anchor = true;
+        } else {
+            let anchor_prose = arena.prose_len.get(anchor.idx()).copied().unwrap_or(0);
+            let best_prose = arena.prose_len.get(best.node.idx()).copied().unwrap_or(0);
+            // Lower bound only. An upper bound looked obviously necessary -- four pages regressed
+            // from ~1.0 to ~0.63 and each had an anchor several times larger than the statistical
+            // pick -- but sweeping it over the corpus showed it buys nothing: those four regress
+            // identically with the anchor rung switched off, so the anchor was not their cause,
+            // and capping the ratio only gave up the pages the rung repairs (heise 0.446 -> 0.865,
+            // spiceworks 0.816 -> 1.000). The measurement is in tests/anchor_band.rs.
+            if guarded_div(anchor_prose as f32, best_prose as f32) >= ANCHOR_MIN_PROSE_SHARE {
+                if let Some(c) = cands.iter().find(|c| c.node == anchor) {
+                    chosen = c;
+                    from_anchor = true;
+                }
+            } else {
+                conflict = true;
+            }
+        }
     }
 
     let outermost = cands
         .iter()
-        .all(|c| c.node == best.node || !contains(arena, c.node, best.node));
+        .all(|c| c.node == chosen.node || !contains(arena, c.node, chosen.node));
 
     Selection {
-        article: Some(best.node),
+        article: Some(chosen.node),
         no_article: None,
         confidence: quantize(conf),
         dispersion_floor_used: degenerate,
         region_is_outermost_by_argmax: outermost,
+        region_from_semantic_anchor: from_anchor,
+        signal_conflict: conflict,
     }
 }
 
@@ -447,6 +591,37 @@ mod tests {
                 "found `{forbidden}` in code -- an absolute length test has crept in"
             );
         }
+    }
+
+    #[test]
+    fn the_viability_floor_disqualifies_a_candidate_not_the_page() {
+        // The floor used to be checked on the winner, so one bad argmax reported the whole page as
+        // having no article. Here the link-only candidate is the argmax by construction; the page
+        // must still be able to return the other one.
+        let link_only = Candidate {
+            node: NodeId(1),
+            text_share: 0.9,
+            density: 100.0,
+            link_density: 1.0,
+            purity: 1.0,
+            evidence: 90.0,
+        };
+        let prose = Candidate {
+            node: NodeId(2),
+            text_share: 0.1,
+            density: 10.0,
+            link_density: 0.0,
+            purity: 1.0,
+            evidence: 1.0,
+        };
+        assert!(!link_only.is_viable(), "a region of pure links is not an article");
+        assert!(prose.is_viable());
+
+        // ... and an impure region is impure regardless of how much text it holds.
+        let padded = Candidate { purity: 0.49, ..prose };
+        assert!(!padded.is_viable());
+        let just_pure_enough = Candidate { purity: 0.5, ..prose };
+        assert!(just_pure_enough.is_viable(), "the floor is inclusive");
     }
 
     #[test]

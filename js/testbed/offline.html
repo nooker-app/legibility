@@ -142,7 +142,7 @@ function extract(html) {
   return JSON.parse(json);
 }
 
-const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a" };
+const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a", inert: "#4a4a4a" };
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 function run() {
@@ -202,6 +202,7 @@ function renderRoles(g) {
     ["prose", g.page_prose_len | 0],
     ["control", g.page_control_len | 0],
     ["hidden", g.page_hidden_len | 0],
+    ["inert (not counted)", g.page_inert_len | 0],
     ["alt (sr-only)", g.page_alt_len | 0],
   ];
   const total = Math.max(1, parts.reduce((s, [, v]) => s + v, 0));

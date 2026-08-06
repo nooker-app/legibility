@@ -106,7 +106,8 @@ pub fn serialize_region<P: Profile>(
                                 out.push_str(&escape_text(arena.own_text(NodeId(i as u32))));
                                 out.push_str("</span>");
                             }
-                            // Control, Hidden, and AltOnly-when-disabled contribute nothing.
+                            // Control, Hidden, Inert, and AltOnly-when-disabled contribute
+                            // nothing.
                             _ => {}
                         }
                     }
@@ -114,8 +115,10 @@ pub fn serialize_region<P: Profile>(
                         let tag = arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN);
                         let name = tag.known_name().unwrap_or("");
 
-                        // Hidden subtrees never reach output at all.
-                        if role == TextRole::Hidden {
+                        // Hidden and inert subtrees never reach output at all. Inert is the
+                        // stronger case of the two: a `<script>` body must not be emitted even
+                        // as escaped text, and the sanitizer's raw-text rule depends on it.
+                        if role == TextRole::Hidden || role == TextRole::Inert {
                             report.dropped_subtrees = report.dropped_subtrees.saturating_add(1);
                             continue;
                         }

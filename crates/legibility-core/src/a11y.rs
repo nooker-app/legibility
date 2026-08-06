@@ -34,6 +34,22 @@ pub enum TextRole {
     /// preserved in output HTML behind a `data-lg-sr-only` marker, and recoverable with
     /// `include_sr_only`.
     AltOnly = 3,
+    /// Bytes that are not text at all: `<script>` and `<style>` source, `<template>` contents,
+    /// comments, doctype, processing instructions, `<head>`.
+    ///
+    /// Counted in **no** length column, which is the difference between this and [`Hidden`].
+    ///
+    /// These used to be `Hidden`, and that was a real bug rather than a naming quibble. `purity`
+    /// is `prose / (prose + control + hidden + alt)`, so a container holding 10 KB of minified
+    /// JavaScript and 450 bytes of article scored 0.04 and was thrown out by the purity floor.
+    /// Modern pages inline their bundles: Reddit puts a ~10 KB module script inside `<main>`,
+    /// which made `<main>` — the correct answer — unselectable. The intent of `purity` was to
+    /// catch regions padded with *visible-ish* noise (button labels, `display:none` promo copy),
+    /// and script source is neither. Invisible markup overhead must not be evidence about
+    /// anything.
+    ///
+    /// [`Hidden`]: TextRole::Hidden
+    Inert = 4,
 }
 
 impl TextRole {
@@ -45,14 +61,17 @@ impl TextRole {
 
     /// Strength of this role's claim during inheritance. Higher wins.
     ///
-    /// `Hidden` outranks everything because it is a statement about rendering, not about the
-    /// kind of text: a prose paragraph inside an `aria-hidden` subtree is still not rendered.
+    /// `Hidden` outranks `Control` and `AltOnly` because it is a statement about rendering, not
+    /// about the kind of text: a prose paragraph inside an `aria-hidden` subtree is still not
+    /// rendered. `Inert` outranks even that — bytes inside a `<script>` are not text, so no claim
+    /// about what kind of text they are can apply to them.
     const fn precedence(self) -> u8 {
         match self {
             TextRole::Prose => 0,
             TextRole::AltOnly => 1,
             TextRole::Control => 2,
             TextRole::Hidden => 3,
+            TextRole::Inert => 4,
         }
     }
 
@@ -253,7 +272,13 @@ mod tests {
     fn inherit_is_idempotent_and_associative_enough_to_fold_down_a_tree() {
         // flatten() folds this pairwise down each root-to-leaf path, so a inherit b inherit c
         // must not depend on grouping.
-        let roles = [TextRole::Prose, TextRole::AltOnly, TextRole::Control, TextRole::Hidden];
+        let roles = [
+            TextRole::Prose,
+            TextRole::AltOnly,
+            TextRole::Control,
+            TextRole::Hidden,
+            TextRole::Inert,
+        ];
         for a in roles {
             assert_eq!(TextRole::inherit(a, a), a, "not idempotent for {a:?}");
             for b in roles {
@@ -279,8 +304,20 @@ mod tests {
     #[test]
     fn prose_is_the_only_counted_role() {
         assert!(TextRole::Prose.is_prose());
-        for r in [TextRole::Control, TextRole::Hidden, TextRole::AltOnly] {
+        for r in [TextRole::Control, TextRole::Hidden, TextRole::AltOnly, TextRole::Inert] {
             assert!(!r.is_prose(), "{r:?} must not count toward prose_len");
+        }
+    }
+
+    #[test]
+    fn inert_outranks_hidden_so_script_text_is_never_merely_hidden() {
+        // This ordering is what keeps `<script>` bytes out of the purity denominator. If Hidden
+        // won here, a page that inlines its JS bundle inside <main> would disqualify <main>.
+        assert_eq!(TextRole::inherit(TextRole::Hidden, TextRole::Inert), TextRole::Inert);
+        assert_eq!(TextRole::inherit(TextRole::Inert, TextRole::Hidden), TextRole::Inert);
+        // And a script inside a visually-hidden wrapper is still inert, not hidden prose.
+        for own in [TextRole::Prose, TextRole::Control, TextRole::AltOnly, TextRole::Hidden] {
+            assert_eq!(TextRole::inherit(TextRole::Inert, own), TextRole::Inert);
         }
     }
 }
