@@ -43,13 +43,39 @@ impl TextRole {
         matches!(self, TextRole::Prose)
     }
 
-    /// `Hidden` wins over everything, because it is a statement about rendering rather than
-    /// about the kind of text. Otherwise a more specific classification survives inheritance.
+    /// Strength of this role's claim during inheritance. Higher wins.
+    ///
+    /// `Hidden` outranks everything because it is a statement about rendering, not about the
+    /// kind of text: a prose paragraph inside an `aria-hidden` subtree is still not rendered.
+    const fn precedence(self) -> u8 {
+        match self {
+            TextRole::Prose => 0,
+            TextRole::AltOnly => 1,
+            TextRole::Control => 2,
+            TextRole::Hidden => 3,
+        }
+    }
+
+    /// Combine an inherited role with a node's own classification.
+    ///
+    /// **Every non-prose role inherits**, not only `Hidden`. This is required by the motivating
+    /// case rather than being a tidiness refinement: control text is almost never a direct child
+    /// of the control.
+    ///
+    /// ```text
+    /// <button class="copy"><span class="icon">content_copy</span><span>Copy</span></button>
+    /// ```
+    ///
+    /// Both text nodes sit two levels below the `<button>`. If `Control` stopped at the element
+    /// that declared it, "Copy" would count as prose and the copy-code-button case would not
+    /// actually be fixed. The same argument applies to a `sr-only` wrapper whose text sits in a
+    /// nested `<span>`.
     #[must_use]
     pub const fn inherit(parent: TextRole, own: TextRole) -> TextRole {
-        match parent {
-            TextRole::Hidden => TextRole::Hidden,
-            _ => own,
+        if parent.precedence() >= own.precedence() {
+            parent
+        } else {
+            own
         }
     }
 }
@@ -198,10 +224,46 @@ mod tests {
     }
 
     #[test]
-    fn hidden_is_inherited_but_other_roles_are_not() {
+    fn every_non_prose_role_inherits() {
+        // The copy-code-button case: <button><span>Copy</span></button>. If Control did not
+        // inherit, "Copy" would be scored as prose and the whole point would be missed.
+        assert_eq!(TextRole::inherit(TextRole::Control, TextRole::Prose), TextRole::Control);
+        assert_eq!(TextRole::inherit(TextRole::AltOnly, TextRole::Prose), TextRole::AltOnly);
         assert_eq!(TextRole::inherit(TextRole::Hidden, TextRole::Prose), TextRole::Hidden);
-        assert_eq!(TextRole::inherit(TextRole::Control, TextRole::Prose), TextRole::Prose);
+    }
+
+    #[test]
+    fn hidden_outranks_every_other_role() {
+        // Rendering beats kind-of-text: prose inside an aria-hidden subtree is still not shown.
+        for own in [TextRole::Prose, TextRole::Control, TextRole::AltOnly, TextRole::Hidden] {
+            assert_eq!(TextRole::inherit(TextRole::Hidden, own), TextRole::Hidden);
+        }
+        // ... and a Hidden child inside a Control parent is still Hidden.
+        assert_eq!(TextRole::inherit(TextRole::Control, TextRole::Hidden), TextRole::Hidden);
+    }
+
+    #[test]
+    fn a_more_specific_child_role_still_wins_over_prose_parent() {
         assert_eq!(TextRole::inherit(TextRole::Prose, TextRole::Control), TextRole::Control);
+        assert_eq!(TextRole::inherit(TextRole::Prose, TextRole::AltOnly), TextRole::AltOnly);
+        assert_eq!(TextRole::inherit(TextRole::Prose, TextRole::Prose), TextRole::Prose);
+    }
+
+    #[test]
+    fn inherit_is_idempotent_and_associative_enough_to_fold_down_a_tree() {
+        // flatten() folds this pairwise down each root-to-leaf path, so a inherit b inherit c
+        // must not depend on grouping.
+        let roles = [TextRole::Prose, TextRole::AltOnly, TextRole::Control, TextRole::Hidden];
+        for a in roles {
+            assert_eq!(TextRole::inherit(a, a), a, "not idempotent for {a:?}");
+            for b in roles {
+                for c in roles {
+                    let left = TextRole::inherit(TextRole::inherit(a, b), c);
+                    let right = TextRole::inherit(a, TextRole::inherit(b, c));
+                    assert_eq!(left, right, "grouping matters for {a:?},{b:?},{c:?}");
+                }
+            }
+        }
     }
 
     #[test]

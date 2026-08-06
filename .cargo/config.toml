@@ -1,0 +1,16 @@
+# Per-target panic strategy (plan §1.11.2). Cargo cannot express this in [profile], so it lives
+# here as rustflags.
+#
+#   wasm32-*   -> abort.  A wasm panic traps the instance; it cannot be caught, so unwinding
+#                 machinery is pure size cost.
+#   everything -> unwind. `panic = abort` in a static library embedded in an iOS app kills the
+#   else        host app, which is not an acceptable failure mode for a library. Every FFI entry
+#               point wraps its body in catch_unwind and converts to an error code instead.
+#
+# `xtask ffi-audit` fails if any `#[no_mangle] extern "C"` function is not wrapped.
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "panic=abort"]
+
+[target.wasm32-wasip1]
+rustflags = ["-C", "panic=abort"]

@@ -245,6 +245,26 @@ impl Arena {
         crate::num::guarded_div(link as f32, prose as f32)
     }
 
+    /// **M0 placeholder scorer.** Replaced wholesale by the modern scorer in M6.
+    ///
+    /// `text_density * (1 - link_density)`. Two features are the minimum: neither alone
+    /// separates an article from a navigation block, and finding that out is worth recording.
+    /// A link list is *dense* — six `<a>` elements each holding ten characters beats two
+    /// paragraphs on chars-per-tag — so [`Arena::text_density`] alone ranks a nav block above
+    /// the article. [`Arena::link_density`] is what discriminates them, and it only works as a
+    /// multiplier because it is already a ratio.
+    ///
+    /// Deliberately unnormalized and uncalibrated. It exists so the pipeline is exercisable
+    /// end to end before any real heuristic, and so the M0 gate has something to measure.
+    /// It is *not* the design: it has no page-relative statistic, no semantic anchor, no
+    /// purity floor and no confidence, which are exactly the things M4 through M6 add.
+    #[must_use]
+    pub fn placeholder_evidence(&self, n: NodeId) -> f32 {
+        let density = self.text_density(n);
+        let links = self.link_density(n);
+        density * (1.0 - links.clamp(0.0, 1.0))
+    }
+
     /// Prose bytes per descendant element — the scale-invariant replacement for
     /// Readability's absolute `min(floor(len / 100), 3)` term.
     ///

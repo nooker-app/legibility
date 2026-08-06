@@ -1,0 +1,29 @@
+# Corpus inventory. `xtask corpus verify` fails if the number of scored cases falls below
+# these counts -- a silently shrinking corpus otherwise looks exactly like a passing gate.
+
+[tier_a]
+# mozilla/readability test-pages, used via submodule. Apache-2.0, already public, so these are
+# the one set of fixtures we do not have to fetch.
+source = "corpus/readability (git submodule)"
+pinned_sha = "ab4027a8b37669745016869a37a504727992b2ba"
+cases = 130
+measured_at = "2026-08-06"
+
+[hard]
+# Hand-labelled cases for the four defects. HTML bytes are NEVER committed (D9): each case
+# carries a url, a Wayback snapshot url and a sha256, and `xtask corpus fetch` populates
+# corpus/.cache/ which is gitignored.
+cases = 0
+target = 40
+
+[community]
+# Discussion shapes S-1..S-6: HN, GeekNews, Reddit, Discourse, Stack Overflow, GitHub,
+# plus Korean forums for the quote-reply case.
+cases = 0
+target = 24
+
+[a11y]
+# Icon fonts, copy-code buttons, sr-only, aria-hidden misuse, closed <details>,
+# role=presentation tables.
+cases = 0
+target = 16
