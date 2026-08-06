@@ -1,0 +1,76 @@
+{
+  "schema_version":1,
+  "article":{
+    "html":"<article>\n<p>The first paragraph, which is <em>emphasised</em> in the middle and must not come out as <b>onewordwelded</b> either side of it.</p>\n<p>A second paragraph, far enough from the first that a naive collapse would join them into a single run of text with no break at all between the two.</p>\n<p>Inside a custom element, which is not a tag any consumer knows, so the wrapper goes and the paragraph stays.</p><table><tbody><tr><td><img src=\"/img/diagram.png\" alt=\"A diagram of the pipeline\"></td><td></td></tr></tbody></table><p>A link with <a>a scheme that is refused</a> and one with <a href=\"https://example.test/ok\">a scheme that is not</a>.</p></article>",
+    "text":"The first paragraph, which is emphasised in the middle and must not come out as onewordwelded either side of it. A second paragraph, far enough from the first that a naive collapse would join them into a single run of text with no break at all between the two. Inside a custom element, which is not a tag any consumer knows, so the wrapper goes and the paragraph stays. A link with a scheme that is refused and one with a scheme that is not .",
+    "tag":"article",
+    "kind":"article",
+    "url":null,
+    "prose_len":438,
+    "confidence":6000,
+    "dropped_subtrees":1,
+    "unwrapped":1,
+    "truncated":false,
+    "dispersion_floor":true,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "comments":{
+    "count":0,
+    "depth_source":null,
+    "completeness":{
+      "present":0,
+      "claimed_total":null,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"Notes on serialization",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        38,
+        60
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":null,
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":null,
+    "modified":null,
+    "candidate_count":2
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":0,
+  "diagnostics":{
+    "node_count":45,
+    "page_prose_len":460,
+    "page_control_len":0,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":38,
+    "discussion_shape":null,
+    "limits_hit":[
+      
+    ]
+  }
+}

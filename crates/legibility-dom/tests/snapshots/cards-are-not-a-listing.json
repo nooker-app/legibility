@@ -1,0 +1,76 @@
+{
+  "schema_version":1,
+  "article":{
+    "html":"<article><p>This release closes the long-standing report about revision ordering, and changes the default for two configuration keys that almost nobody had set deliberately.</p><p>Upgrading in place is supported from any 6.x release. The repository format is unchanged, so a downgrade remains possible for as long as no new revisions land.</p></article>",
+    "text":"This release closes the long-standing report about revision ordering, and changes the default for two configuration keys that almost nobody had set deliberately. Upgrading in place is supported from any 6.x release. The repository format is unchanged, so a downgrade remains possible for as long as no new revisions land.",
+    "tag":"article",
+    "kind":"article",
+    "url":null,
+    "prose_len":320,
+    "confidence":8486,
+    "dropped_subtrees":1,
+    "unwrapped":0,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "comments":{
+    "count":0,
+    "depth_source":null,
+    "completeness":{
+      "present":0,
+      "claimed_total":null,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"Release notes for version 6.9",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        41,
+        70
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":null,
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":null,
+    "modified":null,
+    "candidate_count":2
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":1,
+  "diagnostics":{
+    "node_count":31,
+    "page_prose_len":444,
+    "page_control_len":0,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":41,
+    "discussion_shape":null,
+    "limits_hit":[
+      
+    ]
+  }
+}

@@ -1,0 +1,266 @@
+{
+  "schema_version":1,
+  "article":{
+    "html":"<article><div><span>질문</span></div><div><p>어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요</p><p>RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요</p></div></article>",
+    "text":"질문 어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요 RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요",
+    "tag":"article",
+    "kind":"article",
+    "url":null,
+    "prose_len":279,
+    "confidence":8142,
+    "dropped_subtrees":6,
+    "unwrapped":1,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "comments":{
+    "count":18,
+    "depth_source":"CssVariable",
+    "completeness":{
+      "present":18,
+      "claimed_total":18,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      {
+        "author":"사용자0",
+        "timestamp":"2026-07-24T00:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-0",
+        "deleted":false,
+        "text":"답변 0 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자1",
+        "timestamp":"2026-07-24T01:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-1",
+        "deleted":false,
+        "text":"답변 1 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자2",
+        "timestamp":"2026-07-24T02:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-2",
+        "deleted":false,
+        "text":"답변 2 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자3",
+        "timestamp":"2026-07-24T03:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-3",
+        "deleted":false,
+        "text":"답변 3 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자4",
+        "timestamp":"2026-07-24T04:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-4",
+        "deleted":false,
+        "text":"답변 4 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자5",
+        "timestamp":"2026-07-24T05:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-5",
+        "deleted":false,
+        "text":"답변 5 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자6",
+        "timestamp":"2026-07-24T06:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-6",
+        "deleted":false,
+        "text":"답변 6 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자7",
+        "timestamp":"2026-07-24T07:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-7",
+        "deleted":false,
+        "text":"답변 7 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자8",
+        "timestamp":"2026-07-24T08:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-8",
+        "deleted":false,
+        "text":"답변 8 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자9",
+        "timestamp":"2026-07-24T00:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-9",
+        "deleted":false,
+        "text":"답변 9 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자10",
+        "timestamp":"2026-07-24T01:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-10",
+        "deleted":false,
+        "text":"답변 10 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자11",
+        "timestamp":"2026-07-24T02:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-11",
+        "deleted":false,
+        "text":"답변 11 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자12",
+        "timestamp":"2026-07-24T03:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-12",
+        "deleted":false,
+        "text":"답변 12 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자13",
+        "timestamp":"2026-07-24T04:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-13",
+        "deleted":false,
+        "text":"답변 13 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자14",
+        "timestamp":"2026-07-24T05:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-14",
+        "deleted":false,
+        "text":"답변 14 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자15",
+        "timestamp":"2026-07-24T06:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-15",
+        "deleted":false,
+        "text":"답변 15 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자16",
+        "timestamp":"2026-07-24T07:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-16",
+        "deleted":false,
+        "text":"답변 16 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      },
+      {
+        "author":"사용자17",
+        "timestamp":"2026-07-24T08:00:00.000Z",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment-17",
+        "deleted":false,
+        "text":"답변 17 입니다. 이 댓글은 본문보다 훨씬 길고 밀도도 높아서 통계만으로는 본문을 이깁니다. 실제로 그런 일이 일어났습니다."
+      }
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        210,
+        285
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":{
+      "value":"BeeBS",
+      "source":"open-graph",
+      "confidence":85,
+      "span":[
+        104,
+        109
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":{
+      "candidate":{
+        "value":"2026-07-24T02:39:52.607Z",
+        "source":"time-element",
+        "confidence":75,
+        "span":[
+          419,
+          443
+        ],
+        "transforms":[
+          "EntityDecodedByParser"
+        ],
+        "verbatim_ok":true
+      },
+      "raw":"2026-07-24T02:39:52.607Z",
+      "iso8601":"2026-07-24T02:39:52.607Z",
+      "tz_known":true
+    },
+    "modified":null,
+    "candidate_count":22
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":1,
+  "diagnostics":{
+    "node_count":294,
+    "page_prose_len":3948,
+    "page_control_len":41,
+    "page_hidden_len":54,
+    "page_alt_len":0,
+    "page_inert_len":92,
+    "discussion_shape":"with-body",
+    "limits_hit":[
+      
+    ]
+  }
+}

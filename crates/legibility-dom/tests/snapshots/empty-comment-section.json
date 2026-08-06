@@ -1,0 +1,76 @@
+{
+  "schema_version":1,
+  "article":{
+    "html":"<article><p>The warmer runs from the same queue as everything else, which is why it is bounded by the same concurrency limit and why a cold start is slower than the numbers suggest.</p><p>Each entry is fetched once and shared, so a burst of readers for the same key costs one fetch rather than one per reader.</p></article>",
+    "text":"The warmer runs from the same queue as everything else, which is why it is bounded by the same concurrency limit and why a cold start is slower than the numbers suggest. Each entry is fetched once and shared, so a burst of readers for the same key costs one fetch rather than one per reader.",
+    "tag":"article",
+    "kind":"article",
+    "url":null,
+    "prose_len":290,
+    "confidence":6930,
+    "dropped_subtrees":1,
+    "unwrapped":0,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "comments":{
+    "count":0,
+    "depth_source":null,
+    "completeness":{
+      "present":0,
+      "claimed_total":null,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"How the cache is warmed",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        39,
+        62
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":null,
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":null,
+    "modified":null,
+    "candidate_count":2
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":0,
+  "diagnostics":{
+    "node_count":20,
+    "page_prose_len":422,
+    "page_control_len":0,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":39,
+    "discussion_shape":null,
+    "limits_hit":[
+      
+    ]
+  }
+}
