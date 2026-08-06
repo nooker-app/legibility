@@ -161,7 +161,8 @@ fn fetch(url: &str) -> Result<String, String> {
 
 fn extract_json(html: &str, url: Option<&str>) -> String {
     let (arena, hit) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
-    let sel = legibility_core::select_article(&arena);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let sel = out.selection;
     let region = sel.article;
 
     let mut s = String::from("{\"schema_version\":1");
@@ -201,9 +202,17 @@ fn extract_json(html: &str, url: Option<&str>) -> String {
         s.push_str(",\"no_article\":");
         s.push_str(&json_string(&format!("{r:?}")));
     }
-    s.push_str(",\"comments\":{\"count\":0,\"items\":[],\"implemented\":false}");
+    s.push_str(",\"comments\":");
+    s.push_str(&comments_json(&out.comments));
+    s.push_str(&format!(
+        ",\"page_kind\":{},\"comment_mask_reverted\":{},\"group_count\":{},\"comment_prose_share\":{:.3}",
+        json_string(if out.is_listing { "listing" } else { "article-or-discussion" }),
+        out.comment_mask_reverted,
+        out.group_count,
+        out.comment_prose_share
+    ));
     s.push_str(",\"metadata\":");
-    s.push_str(&metadata_json(&arena));
+    s.push_str(&metadata_json(&arena, &out.metadata));
     s.push_str(&format!(
         ",\"diagnostics\":{{\"node_count\":{},\
          \"page_prose_len\":{},\"page_control_len\":{},\"page_hidden_len\":{},\"page_alt_len\":{},\
@@ -218,13 +227,54 @@ fn extract_json(html: &str, url: Option<&str>) -> String {
     s
 }
 
+/// Serialize the comment thread, including how complete it is.
+///
+/// `completeness` is the point. Reddit's "load more", Discourse's lazy scroll and Hacker News's
+/// pagination all mean the HTML holds only part of the thread, and a caller shown 20 of 400 items
+/// with no indication would reasonably believe it had all of them.
+fn comments_json(set: &legibility_core::CommentSet) -> String {
+    let items: Vec<String> = set
+        .items
+        .iter()
+        .map(|it| {
+            format!(
+                "{{\"author\":{},\"timestamp\":{},\"depth\":{},\"parent\":{},\
+                 \"permalink\":{},\"deleted\":{},\"text\":{}}}",
+                it.author.as_ref().map_or("null".to_string(), |a| json_string(a)),
+                it.timestamp.as_ref().map_or("null".to_string(), |t| json_string(t)),
+                it.depth,
+                it.parent.map_or("null".to_string(), |p| p.to_string()),
+                it.permalink.as_ref().map_or("null".to_string(), |p| json_string(p)),
+                it.flags.deleted,
+                json_string(&it.text)
+            )
+        })
+        .collect();
+    let c = &set.completeness;
+    let continuation = format!(
+        "[{}]",
+        c.continuation.iter().map(|u| json_string(u)).collect::<Vec<_>>().join(",")
+    );
+    format!(
+        "{{\"count\":{},\"depth_source\":{},\"completeness\":{{\"present\":{},\
+         \"claimed_total\":{},\"truncated\":{},\"reason\":{},\"continuation\":{}}},\"items\":[{}]}}",
+        set.items.len(),
+        set.depth_source.map_or("null".to_string(), |d| json_string(&format!("{d:?}"))),
+        c.present,
+        c.claimed_total.map_or("null".to_string(), |v| v.to_string()),
+        c.truncated,
+        c.reason.map_or("null".to_string(), |r| json_string(&format!("{r:?}"))),
+        continuation,
+        items.join(",")
+    )
+}
+
 /// Serialize metadata with its provenance intact.
 ///
 /// Every field carries `source`, `confidence` and the `transforms` applied, because the point of
 /// the metadata subsystem is that a caller can see *why* a value looks the way it does and override
 /// it. Emitting bare strings would throw away the whole design.
-fn metadata_json(arena: &legibility_core::Arena) -> String {
-    let m = legibility_core::meta::extract(arena);
+fn metadata_json(arena: &legibility_core::Arena, m: &legibility_core::Metadata) -> String {
     let cand = |c: &legibility_core::meta::Candidate| {
         let transforms: Vec<String> = c
             .transforms

@@ -1,0 +1,21 @@
+# old.reddit.com — a self post with genuinely zero comments.
+#
+# Chosen precisely because the thread is empty: "no comments (yet)". An extractor that invents a
+# count, or that reports truncated for an empty thread, fails here and passes on busier pages.
+url = "https://old.reddit.com/r/rss/comments/1vezc5f/"
+kind = "discussion"
+language = "en"
+
+[expect]
+comment_count = 0
+claimed_total = "none"        # the page states no number, so none may be reported
+comments_truncated = false    # empty is not truncated
+article_present = true        # the self-text must still be extracted
+sidebar_promo_in_article = false  # 10x "read next" links must not reach the body
+
+[notes]
+why = """
+www.reddit.com serves a JavaScript shell to any non-browser client -- 8 KB with no content -- so the
+new UI cannot be extracted from raw HTML at all. That is a documented limitation, not a bug to fix
+here: the engine's contract is already-rendered HTML. old.reddit.com serves real markup.
+"""

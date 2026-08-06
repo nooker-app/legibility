@@ -37,14 +37,20 @@ extern crate alloc;
 
 pub mod a11y;
 pub mod arena;
+pub mod comments;
+pub mod groups;
 pub mod limits;
 pub mod meta;
 pub mod num;
+pub mod pipeline;
 pub mod score;
 pub mod tag;
 
 pub use arena::{Arena, NodeId, NodeKind};
 pub use limits::{Limits, LimitsHit};
+pub use comments::{CommentItem, CommentSet, Completeness, DepthSource};
+pub use groups::{find_groups, Group};
+pub use pipeline::{run as extract_all, Outcome};
 pub use meta::{Candidate as MetaCandidate, Metadata, Source as MetaSource};
 pub use score::{select_article, Candidate, PageStats, Selection};
 pub use tag::TagId;

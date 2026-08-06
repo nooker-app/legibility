@@ -99,6 +99,9 @@ attr_names! {
     HTTP_EQUIV = 18, "http-equiv";
     CHARSET = 19, "charset";
     VALUE = 20, "value";
+    STYLE = 21, "style";
+    WIDTH = 22, "width";
+    INDENT = 23, "indent";
 }
 
 /// Index into the arena's columns. `u32` rather than `usize`: it halves the index columns on

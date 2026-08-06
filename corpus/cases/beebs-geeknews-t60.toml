@@ -1,0 +1,24 @@
+# beebs.hada.io — Korean discussion board, 18 comments.
+#
+# HTML bytes are NOT committed (D9: public repo, git history is permanent). `xtask corpus fetch`
+# populates corpus/.cache/ from the Wayback snapshot.
+url = "https://beebs.hada.io/b/geeknews/t/60"
+kind = "discussion"
+language = "ko"
+
+# What this case is for. Every expectation is a property the engine got wrong at some point.
+[expect]
+comment_count = 18            # the thread arrived as 9 + 3 before groups were merged by identity
+claimed_total = 18            # stated by the page as "댓글 18"
+comments_truncated = false    # present == claimed, so nothing may be reported as missing
+depth_source = "CssVariable"  # style="--comment-depth:N" on an inner <article>, not on the <li>
+authors_distinct_min = 3      # a single repeated author means the byline scan latched onto the OP
+comment_text_in_article = false
+
+[notes]
+why = """
+The comment items are <li class="comment-tree-item"> nested one level per reply, each containing an
+author profile link, a <time datetime>, and an id. Reply levels get their own <ol>, so a thread of
+one can never form a sibling group -- masking and extraction both work by (tag, class) identity for
+that reason.
+"""

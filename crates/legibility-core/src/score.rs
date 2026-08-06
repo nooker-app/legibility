@@ -90,9 +90,18 @@ fn is_candidate_tag(tag: TagId) -> bool {
 }
 
 /// Collect and score every candidate, then compute the page-relative statistics.
+///
+/// `masked_prose` subtracts comment-thread prose per node (see `crate::groups`). Passing all zeros
+/// scores the document as if comments were part of the article, which is what Readability does and
+/// why a long first comment wins on Hacker News.
 #[must_use]
-pub fn collect(arena: &Arena) -> (Vec<Candidate>, PageStats) {
-    let page_prose = arena.prose_len.first().copied().unwrap_or(0);
+pub fn collect_masked(arena: &Arena, masked_prose: &[u32]) -> (Vec<Candidate>, PageStats) {
+    let page_prose = arena
+        .prose_len
+        .first()
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(masked_prose.first().copied().unwrap_or(0));
     let mut cands = Vec::new();
 
     for i in 0..arena.len() {
@@ -104,7 +113,13 @@ pub fn collect(arena: &Arena) -> (Vec<Candidate>, PageStats) {
             continue;
         }
         let node = NodeId(i as u32);
-        let prose = arena.prose_len.get(i).copied().unwrap_or(0);
+        let masked = masked_prose.get(i).copied().unwrap_or(0);
+        let prose = arena
+            .prose_len
+            .get(i)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(masked);
         if prose == 0 {
             continue;
         }
@@ -135,6 +150,13 @@ pub fn collect(arena: &Arena) -> (Vec<Candidate>, PageStats) {
 
     let stats = page_stats(page_prose, &cands);
     (cands, stats)
+}
+
+/// [`collect_masked`] with no mask.
+#[must_use]
+pub fn collect(arena: &Arena) -> (Vec<Candidate>, PageStats) {
+    let zeros = alloc::vec![0u32; arena.len()];
+    collect_masked(arena, &zeros)
 }
 
 /// Median and IQR of candidate density via a 256-bucket log-spaced histogram.
@@ -245,7 +267,18 @@ pub struct Selection {
 /// accept decision is a margin over the *runner-up* plus a purity floor, both relative.
 #[must_use]
 pub fn select_article(arena: &Arena) -> Selection {
-    let (cands, stats) = collect(arena);
+    let zeros = alloc::vec![0u32; arena.len()];
+    select_article_masked(arena, &zeros)
+}
+
+/// Select the article region with comment prose masked out.
+///
+/// The mask is applied *before* scoring rather than filtered afterwards, which is the whole point:
+/// once a long comment thread is in the candidate pool it wins, and no amount of post-filtering
+/// recovers the submission it displaced.
+#[must_use]
+pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
+    let (cands, stats) = collect_masked(arena, masked_prose);
 
     if cands.is_empty() {
         // Zero candidates means no container held any prose at all -- an empty page, an error
