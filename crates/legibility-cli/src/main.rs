@@ -5,6 +5,8 @@
 //! is not extraction quality; it is that `parse -> arena -> flatten -> accumulate -> score ->
 //! serialize` runs end to end and produces byte-identical output on every target.
 
+mod serve;
+
 use std::io::Read;
 
 use legibility_core::{Arena, Limits, LimitsHit, NodeId, NodeKind, TagId};
@@ -29,7 +31,7 @@ fn main() {
         "text" => match read_input(rest.first().map(String::as_str)) {
             Ok(html) => {
                 let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
-                match best_region(&arena) {
+                match legibility_core::select_article(&arena).article {
                     Some(n) => print!("{}", prose_text(&arena, n)),
                     None => eprintln!("lgb: no region accepted"),
                 }
@@ -39,8 +41,20 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        "serve" => {
+            let port = rest
+                .iter()
+                .position(|a| a == "--port")
+                .and_then(|i| rest.get(i + 1))
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8080u16);
+            if let Err(e) = serve::serve(port) {
+                eprintln!("lgb serve: {e}");
+                std::process::exit(1);
+            }
+        }
         "" => {
-            eprintln!("usage: lgb <extract|text> [file|-]");
+            eprintln!("usage: lgb <extract|text|serve> [file|-] [--port N]");
             std::process::exit(2);
         }
         other => {
@@ -70,6 +84,7 @@ fn read_input(path: Option<&str>) -> Result<String, String> {
 /// Ranking uses the integer key from `legibility_core::num::rank_key`, so ties break by document
 /// order rather than by whatever the sort happened to do — see that function for why an
 /// intermittently-different winner is worse than a consistently mediocre one.
+#[allow(dead_code)]
 fn best_region(arena: &Arena) -> Option<NodeId> {
     let mut best: Option<((core::cmp::Reverse<u16>, u32), NodeId)> = None;
     for i in 0..arena.len() {
@@ -129,7 +144,8 @@ fn prose_text(arena: &Arena, region: NodeId) -> String {
 /// `blake3` of this output across native, wasip1 and headless Chrome — and a derive macro would
 /// put that contract at the mercy of a dependency's field ordering.
 fn to_json(arena: &Arena, hit: LimitsHit) -> String {
-    let region = best_region(arena);
+    let sel = legibility_core::select_article(arena);
+    let region = sel.article;
     let mut s = String::from("{\"schema_version\":1,\"article\":");
     match region {
         Some(n) => {
@@ -145,12 +161,14 @@ fn to_json(arena: &Arena, hit: LimitsHit) -> String {
             );
             // `calibrated` is false permanently in v1, not pending. Calibration needs a labelled
             // corpus; claiming it without one would be worse than admitting its absence.
+            s.push_str(&format!(",\"confidence\":{}", sel.confidence));
             s.push_str(",\"calibrated\":false}");
         }
         None => s.push_str("null"),
     }
-    if region.is_none() {
-        s.push_str(",\"no_article\":\"NoTextContent\"");
+    if let Some(r) = sel.no_article {
+        s.push_str(",\"no_article\":");
+        push_json_string(&mut s, &format!("{r:?}"));
     }
     // Present-and-empty from day one. A key that appears in a later version is a schema break
     // for every consumer that already shipped against its absence.

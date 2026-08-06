@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 legibility-core = { workspace = true }
+legibility-sanitize = { workspace = true }
 html5ever = { workspace = true }
 markup5ever = { workspace = true }
 tendril = { workspace = true }

@@ -17,6 +17,8 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+pub mod serialize;
+
 use std::cell::{Ref, RefCell};
 
 use html5ever::interface::{ElementFlags, NodeOrText, QuirksMode, TreeSink};

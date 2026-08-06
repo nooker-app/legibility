@@ -1,0 +1,188 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>legibility — demo</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --dim: #8888; --ok: #2f6f4f; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 ui-sans-serif, -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  header { padding: .9rem 1.2rem; border-bottom: 1px solid var(--line); display: flex; gap: .8rem; align-items: baseline; flex-wrap: wrap; }
+  h1 { font-size: 1rem; margin: 0; font-weight: 700; }
+  .note { color: var(--dim); font-size: .8rem; }
+  main { display: grid; grid-template-columns: minmax(20rem, 4fr) minmax(24rem, 6fr); gap: 0; min-height: calc(100vh - 3.4rem); }
+  @media (max-width: 60rem) { main { grid-template-columns: 1fr; } }
+  .pane { padding: 1rem 1.2rem; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  @media (max-width: 60rem) { .pane + .pane { border-left: 0; border-top: 1px solid var(--line); } }
+  .tabs { display: flex; gap: .4rem; margin-bottom: .6rem; }
+  button { font: inherit; padding: .35rem .8rem; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+  button[aria-selected="true"] { background: #8882; font-weight: 600; }
+  button.go { background: var(--ok); color: #fff; border-color: transparent; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=url], textarea { width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; }
+  textarea { min-height: 16rem; font-family: ui-monospace, monospace; font-size: .78rem; resize: vertical; }
+  .row { display: flex; gap: .5rem; margin-bottom: .6rem; }
+  .row input { flex: 1; min-width: 0; }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 1.4rem 0 .4rem; }
+  h2:first-of-type { margin-top: 0; }
+  #article { border-left: 3px solid var(--ok); padding-left: 1rem; overflow-wrap: break-word; }
+  #article img { max-width: 100%; height: auto; }
+  #article pre { overflow-x: auto; background: #8881; padding: .6rem; border-radius: 4px; }
+  #article table { display: block; overflow-x: auto; border-collapse: collapse; }
+  #article td, #article th { border: 1px solid var(--line); padding: .3rem .5rem; }
+  table.stats { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  table.stats td { padding: .2rem .4rem; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { display: inline-block; height: .75rem; border-radius: 2px; }
+  .barcell { width: 55%; }
+  pre.json { font-size: .72rem; overflow-x: auto; background: #8881; padding: .6rem; border-radius: 4px; max-height: 22rem; }
+  .err { color: #c33; white-space: pre-wrap; }
+  .pill { display: inline-block; font-size: .7rem; padding: .1rem .45rem; border: 1px solid var(--line); border-radius: 99px; color: var(--dim); }
+  .unimpl { color: var(--dim); font-style: italic; }
+</style>
+
+<header>
+  <h1>legibility <span class="pill" id="stage">M0 · placeholder scorer</span></h1>
+  <span class="note">Not finished. The scorer is <code>text_density × (1 − link_density)</code>; metadata and comment separation are not implemented yet.</span>
+</header>
+
+<main>
+  <section class="pane">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-url" aria-selected="true">URL</button>
+      <button role="tab" id="tab-html" aria-selected="false">Paste HTML</button>
+    </div>
+
+    <div id="panel-url">
+      <div class="row">
+        <input type="url" id="url" placeholder="https://news.ycombinator.com/item?id=1" spellcheck="false">
+        <button class="go" id="go-url">Extract</button>
+      </div>
+      <p class="note">Fetched server-side via <code>curl</code>, so CORS does not apply. The published
+        gh-pages demo cannot do this — a static page has no way to fetch a third-party URL.</p>
+      <h2>Try</h2>
+      <p class="note" id="samples"></p>
+    </div>
+
+    <div id="panel-html" hidden>
+      <textarea id="html" spellcheck="false" placeholder="&lt;html&gt;…&lt;/html&gt;"></textarea>
+      <div class="row" style="margin-top:.6rem"><button class="go" id="go-html">Extract</button></div>
+    </div>
+
+    <h2>Where the page's text went</h2>
+    <table class="stats" id="roles"><tr><td class="note" colspan="4">no result yet</td></tr></table>
+    <p class="note">Only <strong>prose</strong> reaches any statistic. Readability counts all of it,
+      which is why icon ligatures, “copy code” labels and <code>hidden</code> blocks distort its scores.
+      <code>alt</code> is screen-reader text: excluded from the reader view, but preserved rather than deleted.</p>
+  </section>
+
+  <section class="pane">
+    <h2>Extracted article <span id="meta" class="note"></span></h2>
+    <div id="article"><p class="note">Enter a URL or paste HTML.</p></div>
+
+    <h2>Metadata</h2>
+    <p id="metadata" class="unimpl">Not implemented (plan M3: title/author/date as candidates carrying provenance).</p>
+
+    <h2>Comments</h2>
+    <p id="comments" class="unimpl">Not implemented (plan M8–M9: masked out of the article pool before scoring, six discussion shapes).</p>
+
+    <h2>Raw output</h2>
+    <pre class="json" id="json">—</pre>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SAMPLES = [
+  ["Hacker News item", "https://news.ycombinator.com/item?id=1"],
+  ["GeekNews", "https://news.hada.io/"],
+  ["Wikipedia (ko)", "https://ko.wikipedia.org/wiki/HTML"],
+];
+$("samples").innerHTML = SAMPLES.map(([n, u]) =>
+  `<a href="#" data-url="${u}">${n}</a>`).join(" · ");
+$("samples").addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-url]");
+  if (!a) return;
+  e.preventDefault();
+  $("url").value = a.dataset.url;
+  run({ url: a.dataset.url });
+});
+
+function selectTab(which) {
+  const url = which === "url";
+  $("tab-url").ariaSelected = String(url);
+  $("tab-html").ariaSelected = String(!url);
+  $("panel-url").hidden = !url;
+  $("panel-html").hidden = url;
+}
+$("tab-url").onclick = () => selectTab("url");
+$("tab-html").onclick = () => selectTab("html");
+$("go-url").onclick = () => run({ url: $("url").value });
+$("go-html").onclick = () => run({ html: $("html").value });
+$("url").addEventListener("keydown", (e) => { if (e.key === "Enter") run({ url: $("url").value }); });
+
+const COLORS = { prose: "#2f6f4f", control: "#8a5a2b", hidden: "#6b3f7a", alt: "#2b5f8a" };
+
+async function run(payload) {
+  for (const b of document.querySelectorAll("button.go")) b.disabled = true;
+  $("article").innerHTML = '<p class="note">working…</p>';
+  $("json").textContent = "—";
+  try {
+    const res = await fetch("/extract", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    $("article").innerHTML = `<p class="err">${String(e)}</p>`;
+  } finally {
+    for (const b of document.querySelectorAll("button.go")) b.disabled = false;
+  }
+}
+
+function render(data) {
+  $("json").textContent = JSON.stringify(data, null, 2);
+  if (data.error) {
+    $("article").innerHTML = `<p class="err">${escapeHtml(data.error)}</p>`;
+    $("meta").textContent = "";
+    $("roles").innerHTML = '<tr><td class="note" colspan="4">—</td></tr>';
+    return;
+  }
+
+  const a = data.article;
+  if (a) {
+    // The engine owns sanitization; this is deliberately injected as HTML to exercise that.
+    // If anything executable ever appears here, the sanitizer has a bug and we want to see it.
+    $("article").innerHTML = a.html || "<p class='note'>(empty)</p>";
+    $("meta").textContent =
+      `<${a.tag}> · prose ${a.prose_len}B · dropped ${a.dropped_subtrees} subtrees` +
+      `${a.truncated ? " · TRUNCATED" : ""} · calibrated ${a.calibrated}`;
+  } else {
+    $("article").innerHTML = '<p class="err">no article accepted</p>';
+    $("meta").textContent = "";
+  }
+
+  const d = data.diagnostics || {};
+  const parts = [
+    ["prose", d.page_prose_len | 0],
+    ["control", d.page_control_len | 0],
+    ["hidden", d.page_hidden_len | 0],
+    ["alt (sr-only)", d.page_alt_len | 0],
+  ];
+  const total = Math.max(1, parts.reduce((s, [, v]) => s + v, 0));
+  $("roles").innerHTML = parts.map(([n, v]) => {
+    const key = n.split(" ")[0];
+    const pct = (v * 100 / total).toFixed(1);
+    return `<tr><td>${n}</td><td class="num">${v}</td>` +
+      `<td class="barcell"><span class="bar" style="width:${pct}%;background:${COLORS[key]}"></span></td>` +
+      `<td class="num">${pct}%</td></tr>`;
+  }).join("") + `<tr><td class="note">nodes</td><td class="num note">${d.node_count | 0}</td>` +
+    `<td class="note" colspan="2">${(d.limits_hit || []).length ? "limits: " + d.limits_hit.join(", ") : ""}</td></tr>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+</script>

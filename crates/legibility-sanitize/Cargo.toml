@@ -8,4 +8,3 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-legibility-core = { workspace = true }

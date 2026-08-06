@@ -51,6 +51,7 @@ dependencies = [
  "legibility",
  "legibility-core",
  "legibility-dom",
+ "legibility-sanitize",
 ]
 
 [[package]]
@@ -63,6 +64,7 @@ version = "0.0.0"
 dependencies = [
  "html5ever",
  "legibility-core",
+ "legibility-sanitize",
  "markup5ever",
  "tendril",
 ]
@@ -91,9 +93,6 @@ dependencies = [
 [[package]]
 name = "legibility-sanitize"
 version = "0.0.0"
-dependencies = [
- "legibility-core",
-]
 
 [[package]]
 name = "legibility-wasm"

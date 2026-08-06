@@ -39,10 +39,12 @@ pub mod a11y;
 pub mod arena;
 pub mod limits;
 pub mod num;
+pub mod score;
 pub mod tag;
 
 pub use arena::{Arena, NodeId, NodeKind};
 pub use limits::{Limits, LimitsHit};
+pub use score::{select_article, Candidate, PageStats, Selection};
 pub use tag::TagId;
 
 /// Result of an extraction.
