@@ -37,19 +37,29 @@ dom_smoothie  (MIT License)
 https://github.com/niklak/dom_smoothie
 Copyright (c) 2024 Mykola Humanov
 
-Portions of `legibility-legacy` -- specifically the transcription of Readability.js's
-scoring arithmetic, word lists, comma table, title-separator table, metadata key tables
-and URL helpers into Rust idiom -- were informed by dom_smoothie's existing transcription
-of the same upstream algorithm. Files containing such portions carry an attribution header
-naming the dom_smoothie source file.
+NOT CURRENTLY A DEPENDENCY, AND NO CODE FROM IT IS PRESENT IN THIS TREE.
 
-dom_smoothie is additionally used as a second differential baseline in the parity harness
-(see docs/parity-gate.md). It is an observation point, not an authority: several
-deliberate divergences from Readability.js are registered as expected divergences rather
-than failures, most notably `min_score_to_adjust` (default 5.0), which causes candidates
-scoring at or below 5.0 to skip link-density normalization entirely.
+dom_smoothie 0.18.0 was read as prior art while deciding whether to build this engine at
+all; that analysis is docs/adr/0001-probe-b-dom-smoothie.md. Reading is not copying, so
+this section confers no attribution obligation today. It is recorded here in advance
+because two planned uses would create one, and the obligation is easier to honour if it is
+written down before the code lands than remembered afterwards:
 
-MIT License text for dom_smoothie:
+  1. Transcription. `legibility-legacy` will port Readability.js's scoring arithmetic, word
+     lists, comma table, title-separator table, metadata key tables and URL helpers into
+     Rust. Where that work is informed by dom_smoothie's existing transcription of the same
+     upstream algorithm, the file gets an attribution header naming the dom_smoothie source
+     file, and this section is rewritten in the present tense.
+
+  2. Test-only dependency. dom_smoothie is planned as a second differential baseline in the
+     parity harness -- an observation point, not an authority, with its deliberate
+     divergences from Readability.js registered as expected divergences rather than
+     failures. The most consequential is `min_score_to_adjust` (default 5.0), which causes
+     candidates scoring at or below 5.0 to skip link-density normalization entirely.
+
+Neither has happened yet. When either does, this notice must be updated in the same commit.
+
+MIT License text for dom_smoothie, reproduced for reference:
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
