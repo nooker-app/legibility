@@ -42,8 +42,8 @@
 </style>
 
 <header>
-  <h1>legibility <span class="pill" id="stage">M0 · placeholder scorer</span></h1>
-  <span class="note">Not finished. The scorer is <code>text_density × (1 − link_density)</code>; metadata and comment separation are not implemented yet.</span>
+  <h1>legibility <span class="pill" id="stage">in progress · M3+M4</span></h1>
+  <span class="note">Not finished. Article selection and metadata work; <strong>comment separation, index-page detection and region cleaning do not</strong> — a listing page is still returned as an article, and a table of contents is still included in the body.</span>
 </header>
 
 <main>
@@ -81,7 +81,11 @@
     <div id="article"><p class="note">Enter a URL or paste HTML.</p></div>
 
     <h2>Metadata</h2>
-    <p id="metadata" class="unimpl">Not implemented (plan M3: title/author/date as candidates carrying provenance).</p>
+    <table class="stats" id="metadata"><tr><td class="note" colspan="3">no result yet</td></tr></table>
+    <p class="note">Every value carries the source it came from, a confidence, and the exact
+      transformations applied. <code>verbatim</code> means the value re-derives from its byte span in
+      the document — nothing was synthesized. Readability splits the title on “ | ”, “ - ” and “ » ”
+      and recombines it with the h1, with no way to recover the original.</p>
 
     <h2>Comments</h2>
     <p id="comments" class="unimpl">Not implemented (plan M8–M9: masked out of the article pool before scoring, six discussion shapes).</p>
@@ -144,6 +148,7 @@ async function run(payload) {
 
 function render(data) {
   $("json").textContent = JSON.stringify(data, null, 2);
+  renderMetadata(data.metadata);
   if (data.error) {
     $("article").innerHTML = `<p class="err">${escapeHtml(data.error)}</p>`;
     $("meta").textContent = "";
@@ -180,6 +185,48 @@ function render(data) {
       `<td class="num">${pct}%</td></tr>`;
   }).join("") + `<tr><td class="note">nodes</td><td class="num note">${d.node_count | 0}</td>` +
     `<td class="note" colspan="2">${(d.limits_hit || []).length ? "limits: " + d.limits_hit.join(", ") : ""}</td></tr>`;
+}
+
+const META_ROWS = [
+  ["title", (m) => m.title],
+  ["title (site name off)", (m) => m.title_without_site_name],
+  ["published", (m) => m.published && m.published.candidate],
+  ["modified", (m) => m.modified && m.modified.candidate],
+  ["site name", (m) => m.site_name],
+  ["language", (m) => m.language],
+  ["description", (m) => m.description],
+  ["canonical url", (m) => m.canonical_url],
+];
+
+function renderMetadata(m) {
+  if (!m) {
+    $("metadata").innerHTML = '<tr><td class="note" colspan="3">—</td></tr>';
+    return;
+  }
+  const rows = [];
+  for (const [label, get] of META_ROWS) {
+    const c = get(m);
+    rows.push(metaRow(label, c));
+  }
+  for (const [i, a] of (m.authors || []).entries()) {
+    rows.push(metaRow(`author ${i + 1}`, a));
+  }
+  if (m.published) {
+    rows.push(`<tr><td class="note">tz known</td><td class="note" colspan="2">` +
+      `${m.published.tz_known} ${m.published.tz_known ? "" : "— no offset in the source, so none is assumed"}</td></tr>`);
+  }
+  $("metadata").innerHTML = rows.join("");
+}
+
+function metaRow(label, c) {
+  if (!c) {
+    return `<tr><td class="note">${label}</td><td class="note" colspan="2">absent</td></tr>`;
+  }
+  const bad = c.verbatim_ok ? "" : ' style="color:#c33"';
+  const tf = (c.transforms || []).join(", ");
+  return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(c.value)}</td>` +
+    `<td class="note"${bad}>${escapeHtml(c.source)} · ${c.confidence}` +
+    `${c.verbatim_ok ? " · verbatim" : " · NOT VERBATIM"}${tf ? " · " + escapeHtml(tf) : ""}</td></tr>`;
 }
 
 function escapeHtml(s) {

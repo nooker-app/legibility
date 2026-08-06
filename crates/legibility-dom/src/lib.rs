@@ -85,6 +85,9 @@ struct BuildNode {
     depth: u16,
     /// A `<template>`'s content fragment.
     template_contents: u32,
+    /// Range into `Build::attrs`.
+    attr_start: u32,
+    attr_len: u16,
 }
 
 impl BuildNode {
@@ -103,6 +106,8 @@ impl BuildNode {
             hidden_reason: None,
             depth: 0,
             template_contents: NONE,
+            attr_start: 0,
+            attr_len: 0,
         }
     }
 }
@@ -112,6 +117,8 @@ struct Build {
     doc_buf: String,
     quirks: QuirksMode,
     limits_hit: LimitsHit,
+    /// Flat attribute table shared by every element.
+    attrs: Vec<legibility_core::arena::Attr>,
     /// Dynamically interned names for custom/unknown elements.
     dynamic_tags: Vec<String>,
     errors: usize,
@@ -135,6 +142,7 @@ impl BuildArena {
             inner: RefCell::new(Build {
                 nodes: vec![doc],
                 doc_buf: String::new(),
+                attrs: Vec::new(),
                 quirks: QuirksMode::NoQuirks,
                 limits_hit: LimitsHit::default(),
                 dynamic_tags: Vec::new(),
@@ -187,7 +195,8 @@ impl BuildArena {
         // doc_buf moves over wholesale: it was accumulated during parsing and every text/attr
         // range already indexes into it. Copying it again would be the single largest
         // avoidable allocation in the pipeline.
-        let mut arena = Arena { doc_buf: build.doc_buf, ..Arena::default() };
+        let mut arena =
+            Arena { doc_buf: build.doc_buf, attrs: build.attrs, ..Arena::default() };
 
         // (build index, inherited role, exit-marker for already-emitted node)
         enum Step {
@@ -233,6 +242,8 @@ impl BuildArena {
                     arena.text_start.push(node.text.0);
                     arena.text_end.push(node.text.1);
                     arena.text_role.push(role);
+                    arena.attr_start.push(node.attr_start);
+                    arena.attr_len.push(node.attr_len);
                     arena.prose_len.push(0);
                     arena.control_len.push(0);
                     arena.hidden_len.push(0);
@@ -289,6 +300,27 @@ impl Build {
             self.doc_buf.push_str(s);
         }
         (start, self.doc_buf.len() as u32)
+    }
+
+    /// Copy attribute values into `doc_buf` and record their spans.
+    ///
+    /// The value is copied rather than referenced because html5ever hands over an
+    /// entity-decoded `StrTendril` and offers no source span. Owning the bytes is what makes the
+    /// verbatim invariant checkable at all -- see `Arena::doc_buf`.
+    fn push_attrs(&mut self, attrs: &[Attribute], limits: &Limits) -> (u32, u16) {
+        let start = self.attrs.len() as u32;
+        let mut n = 0u16;
+        for a in attrs {
+            let name = legibility_core::arena::AttrName::from_name(a.name.local.as_ref());
+            let (vs, ve) = self.push_text(a.value.as_ref(), limits);
+            self.attrs.push(legibility_core::arena::Attr {
+                name,
+                value_start: vs,
+                value_end: ve,
+            });
+            n = n.saturating_add(1);
+        }
+        (start, n)
     }
 
     /// Classify an element from its attributes.
@@ -504,11 +536,15 @@ impl TreeSink for BuildArena {
             attrs.as_slice()
         };
         let (role, hidden) = Build::classify(tag, kept);
+        let kept: Vec<Attribute> = kept.to_vec();
+        let (attr_start, attr_len) = b.push_attrs(&kept, &self.limits);
 
         if let Some(n) = b.nodes.get_mut(id as usize) {
             n.tag = tag;
             n.own_role = role;
             n.hidden_reason = hidden;
+            n.attr_start = attr_start;
+            n.attr_len = attr_len;
         }
         id
     }

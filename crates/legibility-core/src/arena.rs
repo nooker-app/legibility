@@ -23,6 +23,84 @@ use alloc::vec::Vec;
 use crate::a11y::TextRole;
 use crate::tag::TagId;
 
+/// One attribute, with its value recorded as a span rather than a copy.
+///
+/// The span is what makes the verbatim invariant checkable: for any metadata candidate whose
+/// transform set is exactly `{WS_NORMALIZED}`, `ws_normalize(&doc_buf[span]) == value`. Without a
+/// span there is nothing to compare against and "we did not mangle this" is only an assertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attr {
+    /// Interned attribute name.
+    pub name: AttrName,
+    /// Start of the value in [`Arena::doc_buf`].
+    pub value_start: u32,
+    /// End of the value in [`Arena::doc_buf`].
+    pub value_end: u32,
+}
+
+/// Interned attribute name.
+///
+/// Only names the engine actually consults get an id; everything else is [`AttrName::OTHER`].
+/// Metadata extraction is a scan over millions of attributes on a large page, and comparing a
+/// `u16` beats comparing strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AttrName(pub u16);
+
+macro_rules! attr_names {
+    ($($konst:ident = $idx:expr, $name:literal;)*) => {
+        impl AttrName {
+            $(
+                #[doc = concat!("`", $name, "`")]
+                pub const $konst: AttrName = AttrName($idx);
+            )*
+            /// Any attribute the engine does not consult.
+            pub const OTHER: AttrName = AttrName(u16::MAX);
+
+            /// Intern a lowercase attribute name.
+            #[must_use]
+            pub fn from_name(name: &str) -> AttrName {
+                match name {
+                    $($name => AttrName::$konst,)*
+                    _ => AttrName::OTHER,
+                }
+            }
+
+            /// The name of an interned id.
+            #[must_use]
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $(AttrName::$konst => $name,)*
+                    _ => "",
+                }
+            }
+        }
+    };
+}
+
+attr_names! {
+    CONTENT = 0, "content";
+    PROPERTY = 1, "property";
+    NAME = 2, "name";
+    HREF = 3, "href";
+    SRC = 4, "src";
+    DATETIME = 5, "datetime";
+    ITEMPROP = 6, "itemprop";
+    ITEMTYPE = 7, "itemtype";
+    ITEMSCOPE = 8, "itemscope";
+    REL = 9, "rel";
+    LANG = 10, "lang";
+    CLASS = 11, "class";
+    ID = 12, "id";
+    ALT = 13, "alt";
+    TITLE = 14, "title";
+    TYPE = 15, "type";
+    DIR = 16, "dir";
+    ROLE = 17, "role";
+    HTTP_EQUIV = 18, "http-equiv";
+    CHARSET = 19, "charset";
+    VALUE = 20, "value";
+}
+
 /// Index into the arena's columns. `u32` rather than `usize`: it halves the index columns on
 /// 64-bit targets and caps documents at ~4.29e9 nodes, which [`crate::Limits`] bounds far below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -124,6 +202,17 @@ pub struct Arena {
     /// Count of descendant elements, including this node if it is one. Denominator of text density.
     pub element_count: Vec<u32>,
 
+    // ---- attributes, as ranges into a flat table ----
+    /// Index of this node's first attribute in [`Arena::attrs`].
+    pub attr_start: Vec<u32>,
+    /// Number of attributes this node has.
+    pub attr_len: Vec<u16>,
+    /// Every attribute of every element, in document order.
+    ///
+    /// Flat rather than per-node `Vec<Attr>`: one allocation for the document instead of one per
+    /// element, and attribute scans stay linear over contiguous memory.
+    pub attrs: Vec<Attr>,
+
     // ---- side buffers ----
     /// Every text node and attribute value, copied here at parse time.
     ///
@@ -160,6 +249,41 @@ impl Arena {
             Some(&end) => (n.idx() + 1)..(end as usize),
             None => 0..0,
         }
+    }
+
+    /// Attributes of `n`.
+    #[must_use]
+    pub fn attrs_of(&self, n: NodeId) -> &[Attr] {
+        let start = self.attr_start.get(n.idx()).copied().unwrap_or(0) as usize;
+        let len = self.attr_len.get(n.idx()).copied().unwrap_or(0) as usize;
+        self.attrs.get(start..start.saturating_add(len)).unwrap_or(&[])
+    }
+
+    /// Value of `n`'s first attribute named `name`, or `None`.
+    #[must_use]
+    pub fn attr(&self, n: NodeId, name: AttrName) -> Option<&str> {
+        self.attrs_of(n)
+            .iter()
+            .find(|a| a.name == name)
+            .and_then(|a| self.doc_buf.get(a.value_start as usize..a.value_end as usize))
+    }
+
+    /// Span of `n`'s first attribute named `name`.
+    ///
+    /// Returned separately from the value so a metadata candidate can carry the span it came
+    /// from and be checked against `doc_buf` later.
+    #[must_use]
+    pub fn attr_span(&self, n: NodeId, name: AttrName) -> Option<(u32, u32)> {
+        self.attrs_of(n)
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| (a.value_start, a.value_end))
+    }
+
+    /// Text of a span in [`Arena::doc_buf`].
+    #[must_use]
+    pub fn span_text(&self, start: u32, end: u32) -> &str {
+        self.doc_buf.get(start as usize..end as usize).unwrap_or("")
     }
 
     /// This node's own text, or `""` if it has none or the id is unknown.

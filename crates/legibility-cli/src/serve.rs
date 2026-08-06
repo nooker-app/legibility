@@ -202,8 +202,10 @@ fn extract_json(html: &str, url: Option<&str>) -> String {
         s.push_str(&json_string(&format!("{r:?}")));
     }
     s.push_str(",\"comments\":{\"count\":0,\"items\":[],\"implemented\":false}");
+    s.push_str(",\"metadata\":");
+    s.push_str(&metadata_json(&arena));
     s.push_str(&format!(
-        ",\"metadata\":{{\"implemented\":false}},\"diagnostics\":{{\"node_count\":{},\
+        ",\"diagnostics\":{{\"node_count\":{},\
          \"page_prose_len\":{},\"page_control_len\":{},\"page_hidden_len\":{},\"page_alt_len\":{},\
          \"limits_hit\":{}}}}}",
         arena.len(),
@@ -214,6 +216,62 @@ fn extract_json(html: &str, url: Option<&str>) -> String {
         limits_json(hit)
     ));
     s
+}
+
+/// Serialize metadata with its provenance intact.
+///
+/// Every field carries `source`, `confidence` and the `transforms` applied, because the point of
+/// the metadata subsystem is that a caller can see *why* a value looks the way it does and override
+/// it. Emitting bare strings would throw away the whole design.
+fn metadata_json(arena: &legibility_core::Arena) -> String {
+    let m = legibility_core::meta::extract(arena);
+    let cand = |c: &legibility_core::meta::Candidate| {
+        let transforms: Vec<String> = c
+            .transforms
+            .iter()
+            .map(|t| json_string(&format!("{t:?}")))
+            .collect();
+        format!(
+            "{{\"value\":{},\"source\":{},\"confidence\":{},\"span\":[{},{}],\"transforms\":[{}],\"verbatim_ok\":{}}}",
+            json_string(&c.value),
+            json_string(c.source.as_str()),
+            c.confidence,
+            c.span_start,
+            c.span_end,
+            transforms.join(","),
+            c.verify_verbatim(arena)
+        )
+    };
+    let opt = |o: &Option<legibility_core::meta::Candidate>| match o {
+        Some(c) => cand(c),
+        None => "null".to_string(),
+    };
+    let date = |o: &Option<(legibility_core::meta::Candidate, legibility_core::meta::DateValue)>| match o {
+        Some((c, d)) => format!(
+            "{{\"candidate\":{},\"raw\":{},\"iso8601\":{},\"tz_known\":{}}}",
+            cand(c),
+            json_string(&d.raw),
+            d.iso8601.as_ref().map_or("null".to_string(), |v| json_string(v)),
+            d.tz_known
+        ),
+        None => "null".to_string(),
+    };
+    let authors: Vec<String> = m.authors.iter().map(cand).collect();
+    format!(
+        "{{\"title\":{},\"title_without_site_name\":{},\"authors\":[{}],\"published\":{},\
+         \"modified\":{},\"site_name\":{},\"language\":{},\"description\":{},\
+         \"canonical_url\":{},\"candidate_count\":{}}}",
+        opt(&m.title),
+        opt(&m.title_without_site_name),
+        authors.join(","),
+        date(&m.published),
+        date(&m.modified),
+        opt(&m.site_name),
+        opt(&m.language),
+        opt(&m.description),
+        opt(&m.canonical_url),
+        m.alternatives.len()
+    )
 }
 
 fn limits_json(hit: LimitsHit) -> String {

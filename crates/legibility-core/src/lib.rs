@@ -38,12 +38,14 @@ extern crate alloc;
 pub mod a11y;
 pub mod arena;
 pub mod limits;
+pub mod meta;
 pub mod num;
 pub mod score;
 pub mod tag;
 
 pub use arena::{Arena, NodeId, NodeKind};
 pub use limits::{Limits, LimitsHit};
+pub use meta::{Candidate as MetaCandidate, Metadata, Source as MetaSource};
 pub use score::{select_article, Candidate, PageStats, Selection};
 pub use tag::TagId;
 
