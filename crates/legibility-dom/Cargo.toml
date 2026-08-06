@@ -1,0 +1,14 @@
+[package]
+name = "legibility-dom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+legibility-core = { workspace = true }
+html5ever = { workspace = true }
+markup5ever = { workspace = true }
+tendril = { workspace = true }

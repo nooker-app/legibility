@@ -1,0 +1,70 @@
+legibility
+Copyright 2026 Nooker
+
+This product includes software developed at Nooker (https://github.com/nooker-app).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+
+================================================================================
+Third-party attributions
+================================================================================
+
+--------------------------------------------------------------------------------
+mozilla/readability  (Apache License 2.0)
+--------------------------------------------------------------------------------
+https://github.com/mozilla/readability
+Copyright (c) 2010 Arc90 Inc, and subsequent contributors.
+
+The crate `legibility-legacy` is a Rust port of Readability.js's `parse()` pipeline.
+It is a derivative work of mozilla/readability and is therefore covered by that
+project's Apache License 2.0. This is why the entire legibility workspace is licensed
+Apache-2.0: matching the upstream license removes any compatibility question.
+
+`legibility-legacy` exists as a conformance ORACLE, not as a product feature. It lets a
+parity failure be attributed to one of three causes -- a defect in our arena/serializer
+(INFRA), a difference between html5ever and jsdom tree construction (PARSER), or a
+floating-point near-tie selecting a different top candidate (ARITH). Without it, every
+early failure is indistinguishable from every other.
+
+The corpus under corpus/readability/ is a git submodule of mozilla/readability, pinned by
+commit SHA. Its test-pages fixtures remain under that project's license and are not
+redistributed by this repository.
+
+--------------------------------------------------------------------------------
+dom_smoothie  (MIT License)
+--------------------------------------------------------------------------------
+https://github.com/niklak/dom_smoothie
+Copyright (c) 2024 Mykola Humanov
+
+Portions of `legibility-legacy` -- specifically the transcription of Readability.js's
+scoring arithmetic, word lists, comma table, title-separator table, metadata key tables
+and URL helpers into Rust idiom -- were informed by dom_smoothie's existing transcription
+of the same upstream algorithm. Files containing such portions carry an attribution header
+naming the dom_smoothie source file.
+
+dom_smoothie is additionally used as a second differential baseline in the parity harness
+(see docs/parity-gate.md). It is an observation point, not an authority: several
+deliberate divergences from Readability.js are registered as expected divergences rather
+than failures, most notably `min_score_to_adjust` (default 5.0), which causes candidates
+scoring at or below 5.0 to skip link-density normalization entirely.
+
+MIT License text for dom_smoothie:
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.

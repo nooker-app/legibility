@@ -1,0 +1,47 @@
+[package]
+name = "legibility-core"
+description = "Core content-extraction engine for legibility: arena, features, segmentation, regions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints.rust]
+# S1: no unsafe, and every panic-shaped construct is denied rather than reviewed.
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# S1 -- these are the actual panic sources in practice.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+integer_division = "deny"
+# S3 -- float comparison and unwrapping partial_cmp are how nondeterminism enters ranking.
+float_cmp = "deny"
+
+# --- Allowed, each with the reason it is not a defect here ---------------------------------
+# The arena is pervasively u32-indexed; every conversion to usize is on a 64-bit or 32-bit
+# target where u32 -> usize is lossless, and Limits::max_nodes bounds ids far below u32::MAX.
+cast_possible_truncation = "allow"
+# `quantize` casts f32 -> u16 only after proving 0.0 < score < 1.0, so no sign is lost.
+cast_sign_loss = "allow"
+# Byte lengths are cast u32 -> f32 to form ratios. f32 is exact to 2^24 = 16_777_216; above
+# that a length loses low bits. This is deliberate and harmless: the values are only ever
+# denominators/numerators of a ratio, the loss is monotone, and -- critically for S3 -- it is
+# *deterministic*, which is the only property ranking depends on. Using f64 would double the
+# hot columns for precision no decision consumes.
+cast_precision_loss = "allow"
+# Integer arithmetic here is explicitly `saturating_*` (see Arena::accumulate_subtrees) and
+# float arithmetic cannot overflow into UB. Overflow in the integer paths is caught by
+# `overflow-checks = true` in the dev/test profiles rather than by this lint.
+arithmetic_side_effects = "allow"
+# LimitsHit is intentionally one bool per Limits field. Collapsing them into a bitflag would
+# break the one-to-one correspondence that the M10 gate checks field by field.
+struct_excessive_bools = "allow"
+module_name_repetitions = "allow"

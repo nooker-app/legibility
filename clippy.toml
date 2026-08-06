@@ -1,0 +1,35 @@
+# Determinism and panic-freedom are enforced here, not by review (plan §1.2, S1, S3).
+#
+# Numeric policy: no transcendental float ops anywhere. Their results are not guaranteed
+# bit-identical across targets, and S3 promises byte-identical output on
+# x86_64-unknown-linux-gnu + wasm32-wasip1 + wasm32-unknown-unknown. `p_prose` uses a
+# piecewise-linear squash instead of a sigmoid for exactly this reason.
+disallowed-methods = [
+    { path = "f32::exp", reason = "S3: not bit-reproducible across targets. Use a piecewise-linear squash." },
+    { path = "f64::exp", reason = "S3: not bit-reproducible across targets. Use a piecewise-linear squash." },
+    { path = "f32::ln", reason = "S3: not bit-reproducible across targets." },
+    { path = "f64::ln", reason = "S3: not bit-reproducible across targets." },
+    { path = "f32::log", reason = "S3: not bit-reproducible across targets." },
+    { path = "f64::log", reason = "S3: not bit-reproducible across targets." },
+    { path = "f32::powf", reason = "S3: not bit-reproducible across targets. Use integer exponents." },
+    { path = "f64::powf", reason = "S3: not bit-reproducible across targets. Use integer exponents." },
+    { path = "f32::mul_add", reason = "S3: fused-multiply-add availability differs per target." },
+    { path = "f64::mul_add", reason = "S3: fused-multiply-add availability differs per target." },
+    { path = "std::time::SystemTime::now", reason = "core must have no clock access; relative times resolve against a host-injected reference_instant." },
+    { path = "std::time::Instant::now", reason = "core must have no clock access." },
+]
+
+# HashMap/HashSet in an output path makes iteration order observable, which breaks S3.
+# legibility-core is no_std+alloc so these types are already unreachable there; this catches
+# the std crates (-dom, -cli, -legacy) where they are reachable.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "S3: iteration order is observable. Use BTreeMap, or a Vec indexed by u32 node id." },
+    { path = "std::collections::HashSet", reason = "S3: iteration order is observable. Use BTreeSet, or a bitset over node ids." },
+]
+
+# The tree walks must be iterative with explicit Vec stacks. Deeply nested markup is a
+# trivial remote input, and a stack overflow is not catchable (S1).
+# Recursion is checked by `xtask ffi-audit`/`xtask lint-recursion` rather than clippy,
+# which has no reliable recursion lint.
+
+avoid-breaking-exported-api = false

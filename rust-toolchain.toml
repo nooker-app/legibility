@@ -1,0 +1,15 @@
+# Two-toolchain policy (plan §1.6): stable pins build/test/clippy; a SEPARATE pinned nightly
+# (see nightly-toolchain.txt) is invoked explicitly for `cargo fuzz` (-Z sanitizer) and `cargo miri`.
+# Pinning only stable here and forgetting that nightly exists is what breaks CI on day one, so
+# `xtask tool-preflight` asserts both toolchains resolve before any other job runs.
+[toolchain]
+channel = "1.93.1"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = [
+    "aarch64-apple-darwin",
+    "wasm32-wasip1",
+    "wasm32-unknown-unknown",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+]
+profile = "minimal"

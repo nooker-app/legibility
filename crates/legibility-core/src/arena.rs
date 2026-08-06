@@ -1,0 +1,274 @@
+//! The document arena: a flat struct-of-arrays store in document order.
+//!
+//! # Why struct-of-arrays
+//!
+//! Scoring is a handful of linear sweeps over a few numeric columns. An array-of-structs
+//! layout drags an entire node record into cache per touch; `SoA` touches only the columns a
+//! pass actually reads. This is also what makes "a parameter variant costs one O(n) pass"
+//! true — the arena is immutable during scoring, so there is no reason to clone a document
+//! to try different parameters, which is exactly what Readability.js's retry ladder does.
+//!
+//! # Why four length columns rather than one
+//!
+//! `prose_len`, `control_len`, `hidden_len` and `alt_len` are separate (plan §1.10.1). A
+//! single `text_len` column is the bug: icon-font ligature text (`content_copy`), "copy
+//! code" button labels and `aria-hidden` subtrees all inflate it, and every downstream
+//! statistic — link density, text density, the page-relative z-scores — is then computed on
+//! polluted lengths. Removing that text at serialization time is far too late; the region
+//! has already been chosen wrongly. So the split happens during the parse, and every
+//! feature reads `prose_len` only.
+
+use alloc::vec::Vec;
+
+use crate::a11y::TextRole;
+use crate::tag::TagId;
+
+/// Index into the arena's columns. `u32` rather than `usize`: it halves the index columns on
+/// 64-bit targets and caps documents at ~4.29e9 nodes, which [`crate::Limits`] bounds far below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(pub u32);
+
+impl NodeId {
+    /// Sentinel for "no node". Chosen as `u32::MAX` so that a valid id is never `NONE` and a
+    /// forgotten initialization is an out-of-bounds index (caught) rather than node 0 (silent).
+    pub const NONE: NodeId = NodeId(u32::MAX);
+
+    /// Whether this id refers to an actual node.
+    #[must_use]
+    pub const fn is_some(self) -> bool {
+        self.0 != u32::MAX
+    }
+
+    /// Usable as a slice index.
+    #[must_use]
+    pub const fn idx(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// What a node is. Deliberately small: attribute payloads and text live in side buffers, not
+/// in this enum, so the kind column stays one byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum NodeKind {
+    /// An element. Its name is in the `tag` column.
+    Element = 0,
+    /// A text node. Its bytes are `[text_start, text_end)` in the document buffer.
+    Text = 1,
+    /// A comment node. Retained because `<!--[if IE]>` style content affects tree shape.
+    Comment = 2,
+    /// A doctype.
+    Doctype = 3,
+    /// A processing instruction.
+    ProcessingInstruction = 4,
+    /// The document root.
+    Document = 5,
+    /// A node that exceeded [`crate::Limits::max_depth`].
+    ///
+    /// Crucially this is *allocated and recorded*, not dropped. html5ever's tree builder keeps
+    /// its own open-elements stack holding handles it was given; if we drop a node instead of
+    /// returning a usable handle, later `remove_from_parent` / `reparent_children` /
+    /// `append_before_sibling` calls arrive for a node the arena never stored and the arena is
+    /// corrupted. An orphan makes every such operation a well-defined no-op instead.
+    DepthCappedOrphan = 6,
+}
+
+/// A finished, immutable, document-order arena.
+///
+/// Invariants, all established by `legibility-dom`'s flatten step and relied on everywhere:
+///
+/// 1. Index order is document order (pre-order).
+/// 2. `subtree_end[n]` is the exclusive end of `n`'s subtree, so the descendants of `n` are
+///    exactly `n+1 .. subtree_end[n]` — a contiguous slice, no pointer chasing.
+/// 3. Therefore iterating `(0..len).rev()` lets a child's accumulated totals be folded into
+///    its parent in **one** pass, because every descendant has a higher index than its
+///    ancestor. This single property is what removes Readability's quadratic inner-text
+///    recomputation.
+#[derive(Debug, Clone, Default)]
+pub struct Arena {
+    // ---- structure ----
+    /// Parent of each node; [`NodeId::NONE`] for the root.
+    pub parent: Vec<NodeId>,
+    /// Exclusive end index of each node's subtree. See invariant 2.
+    pub subtree_end: Vec<u32>,
+    /// Depth from the document root; the root is 0.
+    pub depth: Vec<u16>,
+
+    // ---- identity ----
+    /// What each node is.
+    pub kind: Vec<NodeKind>,
+    /// Interned element name. Meaningless unless `kind` is [`NodeKind::Element`].
+    pub tag: Vec<TagId>,
+
+    // ---- text, as ranges into `doc_buf` ----
+    /// Start offset of this node's own text in [`Arena::doc_buf`].
+    pub text_start: Vec<u32>,
+    /// End offset of this node's own text in [`Arena::doc_buf`].
+    pub text_end: Vec<u32>,
+
+    // ---- a11y classification (plan §1.10) ----
+    /// Role of this node's own text. Inherited down the tree during flatten for `Hidden`.
+    pub text_role: Vec<TextRole>,
+
+    // ---- accumulated subtree totals, filled by the single reverse pass ----
+    /// Bytes of `Prose` text in this subtree. **All features read this, never a total length.**
+    pub prose_len: Vec<u32>,
+    /// Bytes of `Control` text (button labels, icon ligatures) in this subtree.
+    pub control_len: Vec<u32>,
+    /// Bytes of `Hidden` text in this subtree.
+    pub hidden_len: Vec<u32>,
+    /// Bytes of `AltOnly` text (`sr-only` and friends) in this subtree.
+    pub alt_len: Vec<u32>,
+    /// Bytes of `Prose` text inside `<a>` subtrees. Numerator of link density.
+    pub link_prose_len: Vec<u32>,
+    /// Count of descendant elements, including this node if it is one. Denominator of text density.
+    pub element_count: Vec<u32>,
+
+    // ---- side buffers ----
+    /// Every text node and attribute value, copied here at parse time.
+    ///
+    /// This exists because html5ever hands over entity-decoded `StrTendril` and offers no
+    /// per-node source span (`set_current_line` is the only positional hook). Owning this
+    /// buffer is what makes the verbatim invariant checkable: for any metadata candidate whose
+    /// transform set is exactly `{WS_NORMALIZED}`, `ws_normalize(&doc_buf[span]) == value`.
+    ///
+    /// Note the honest scope: this proves *we* did not mangle the value. It is not
+    /// byte-fidelity against the original network bytes, which v1 does not offer.
+    pub doc_buf: alloc::string::String,
+}
+
+impl Arena {
+    /// Number of nodes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.kind.len()
+    }
+
+    /// Whether the arena holds no nodes.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.kind.is_empty()
+    }
+
+    /// Descendant range of `n`, exclusive of `n` itself.
+    ///
+    /// Returns an empty range for an unknown id rather than panicking: this is called from
+    /// scoring paths where `indexing_slicing` is denied and a bad id must degrade, not abort.
+    #[must_use]
+    pub fn descendants(&self, n: NodeId) -> core::ops::Range<usize> {
+        match self.subtree_end.get(n.idx()) {
+            Some(&end) => (n.idx() + 1)..(end as usize),
+            None => 0..0,
+        }
+    }
+
+    /// This node's own text, or `""` if it has none or the id is unknown.
+    #[must_use]
+    pub fn own_text(&self, n: NodeId) -> &str {
+        let (Some(&s), Some(&e)) = (self.text_start.get(n.idx()), self.text_end.get(n.idx())) else {
+            return "";
+        };
+        self.doc_buf.get(s as usize..e as usize).unwrap_or("")
+    }
+
+    /// Fold every subtree total in **one** reverse pass.
+    ///
+    /// Correctness rests entirely on arena invariant 1: in pre-order, every descendant has a
+    /// strictly higher index than its ancestor. Walking indices downward therefore guarantees a
+    /// node's own subtree is already complete when we add it to its parent, with no recursion,
+    /// no work queue, and no revisiting.
+    ///
+    /// Saturating arithmetic throughout: a hostile document can overflow a `u32` byte count,
+    /// and saturating is a documented degradation (the node is "very large") whereas wrapping
+    /// silently inverts comparisons and a panic violates S1.
+    pub fn accumulate_subtrees(&mut self, a_tag: TagId) {
+        let n = self.len();
+        for i in (0..n).rev() {
+            // Seed from this node's own text, classified by role.
+            let own = self
+                .text_end
+                .get(i)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(self.text_start.get(i).copied().unwrap_or(0));
+
+            match self.text_role.get(i).copied().unwrap_or(TextRole::Prose) {
+                TextRole::Prose => add_at(&mut self.prose_len, i, own),
+                TextRole::Control => add_at(&mut self.control_len, i, own),
+                TextRole::Hidden => add_at(&mut self.hidden_len, i, own),
+                TextRole::AltOnly => add_at(&mut self.alt_len, i, own),
+            }
+
+            if self.kind.get(i).copied() == Some(NodeKind::Element) {
+                add_at(&mut self.element_count, i, 1);
+                // An <a> contributes its whole prose subtree to the link numerator. Done here,
+                // after children have folded up, so the subtree total is already final.
+                if self.tag.get(i).copied() == Some(a_tag) {
+                    let p = self.prose_len.get(i).copied().unwrap_or(0);
+                    set_at(&mut self.link_prose_len, i, p);
+                }
+            }
+
+            // Fold into the parent.
+            let Some(&parent) = self.parent.get(i) else { continue };
+            if !parent.is_some() {
+                continue;
+            }
+            let p = parent.idx();
+            for col in [
+                &mut self.prose_len,
+                &mut self.control_len,
+                &mut self.hidden_len,
+                &mut self.alt_len,
+                &mut self.link_prose_len,
+                &mut self.element_count,
+            ] {
+                let v = col.get(i).copied().unwrap_or(0);
+                add_at(col, p, v);
+            }
+        }
+    }
+
+    /// Link density over **prose only**.
+    ///
+    /// `Control` text is excluded from both numerator and denominator by construction, since
+    /// neither is counted in `prose_len`. That matters: a toolbar of icon buttons should read
+    /// as "no prose", not as "prose with suspiciously high link density", and Readability
+    /// reads it as the latter.
+    ///
+    /// Returns 0.0 for an empty node — see [`crate::num::guarded_div`] for why every division
+    /// in this crate goes through a guard.
+    #[must_use]
+    pub fn link_density(&self, n: NodeId) -> f32 {
+        let prose = self.prose_len.get(n.idx()).copied().unwrap_or(0);
+        let link = self.link_prose_len.get(n.idx()).copied().unwrap_or(0);
+        crate::num::guarded_div(link as f32, prose as f32)
+    }
+
+    /// Prose bytes per descendant element — the scale-invariant replacement for
+    /// Readability's absolute `min(floor(len / 100), 3)` term.
+    ///
+    /// Scale invariance is the entire point of defect 1: duplicating every text node in a
+    /// document must not change which region wins, and an absolute length term guarantees
+    /// that it does.
+    #[must_use]
+    pub fn text_density(&self, n: NodeId) -> f32 {
+        let prose = self.prose_len.get(n.idx()).copied().unwrap_or(0);
+        let elems = self.element_count.get(n.idx()).copied().unwrap_or(0);
+        crate::num::guarded_div(prose as f32, elems as f32)
+    }
+}
+
+#[inline]
+fn add_at(col: &mut [u32], i: usize, v: u32) {
+    if let Some(slot) = col.get_mut(i) {
+        *slot = slot.saturating_add(v);
+    }
+}
+
+#[inline]
+fn set_at(col: &mut [u32], i: usize, v: u32) {
+    if let Some(slot) = col.get_mut(i) {
+        *slot = v;
+    }
+}

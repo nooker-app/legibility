@@ -1,0 +1,22 @@
+/target
+**/target
+Cargo.lock.orig
+
+# Corpus HTML bytes are NEVER committed (plan D9). This repo is public and git history is
+# permanent: a third-party page committed once is published forever. Cases carry a URL, a
+# Wayback snapshot URL and a sha256; the bytes live here and are fetched by `xtask corpus fetch`.
+/corpus/.cache/
+
+# Node, only used out-of-band to regenerate the frozen Readability.js baseline.
+node_modules/
+js/*/node_modules/
+js/*/dist/
+js/testbed/pkg/
+
+# Local scratch
+*.profraw
+.DS_Store
+
+# Claude Code transient session state (project-level config under .claude/ IS tracked).
+.claude/scheduled_tasks.lock
+.claude/**/*.lock

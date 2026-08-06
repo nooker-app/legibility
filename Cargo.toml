@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/legibility",
+    "crates/legibility-core",
+    "crates/legibility-dom",
+    "crates/legibility-sanitize",
+    "crates/legibility-adapters",
+    "crates/legibility-metrics",
+    "crates/legibility-legacy",
+    "crates/legibility-ffi",
+    "crates/legibility-wasm",
+    "crates/legibility-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.93"
+license = "Apache-2.0"
+repository = "https://github.com/nooker-app/legibility"
+authors = ["Nooker"]
+
+[workspace.dependencies]
+# Sole HTML5 parser. Pinned exactly: TreeSink signatures have changed across minors.
+# Measured 2026-08-06: 0.39.0 is both max_stable and newest.
+html5ever = "=0.39.0"
+markup5ever = "=0.39.0"
+tendril = "=0.5.0"
+
+legibility-core = { path = "crates/legibility-core" }
+legibility-dom = { path = "crates/legibility-dom" }
+legibility-sanitize = { path = "crates/legibility-sanitize" }
+legibility-adapters = { path = "crates/legibility-adapters" }
+legibility-metrics = { path = "crates/legibility-metrics" }
+legibility-legacy = { path = "crates/legibility-legacy" }
+
+# `panic` is set per-target, not globally (plan §1.11.2):
+#   wasm32-*        -> abort  (a wasm panic traps the instance; it cannot be caught anyway)
+#   staticlib/native-> unwind (panic=abort in a library embedded in an iOS app kills the host app;
+#                              every FFI entry point wraps its body in catch_unwind instead)
+# Cargo cannot express per-target panic in [profile], so the iOS/native path relies on the
+# default `unwind` here and the wasm path sets `-C panic=abort` via .cargo/config.toml.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+incremental = false
+
+[profile.dev]
+# Arithmetic overflow must be a test failure, never a silent wrap (plan S1).
+overflow-checks = true
+
+[profile.test]
+overflow-checks = true
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+incremental = false
