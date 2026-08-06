@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import base64
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,24 @@ def main() -> int:
     if marker not in template:
         sys.exit(f"{TEMPLATE} is missing the {marker} placeholder")
     html = template.replace(marker, b64)
+
+    # Identify the build on the page itself. Which commit produced this module cannot be recovered
+    # from inside a browser, and a demo running a stale binary is indistinguishable from a fix that
+    # did not work -- a confusion that has already cost two rounds of diagnosis.
+    stamp_marker = "/*__BUILD_STAMP__*/"
+    if stamp_marker not in template:
+        sys.exit(f"{TEMPLATE} is missing the {stamp_marker} placeholder")
+    head = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    ).stdout.strip() or "nogit"
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    # The wasm digest is the part that cannot lie: the commit says what the tree was, this says
+    # what was actually compiled.
+    digest = hashlib.sha256(wasm.read_bytes()).hexdigest()[:8]
+    html = html.replace(stamp_marker, f"{head}{'+dirty' if dirty else ''} · wasm {digest}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")

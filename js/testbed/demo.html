@@ -120,6 +120,10 @@ const WASM_BASE64 = "/*__WASM_BASE64__*/";
 // Careful: the placeholder is *inside* the quotes, so an unsubstituted template yields a 20-char
 // string, not an empty one. Testing `.length` here would always report "embedded".
 const EMBEDDED = !WASM_BASE64.startsWith("/*");
+// Which build of the engine this page is carrying. A stale binary looks exactly like a change that
+// did not work, and twice now a demo report has been read that way when the page was running a
+// module compiled before the fix. A file timestamp cannot be seen from inside the browser; this can.
+const BUILD_STAMP = "/*__BUILD_STAMP__*/";
 
 const $ = (id) => document.getElementById(id);
 
@@ -151,6 +155,7 @@ async function initWasm() {
   $("engine").innerHTML =
     `<tr><td>module</td><td class="num">${(bytes.length / 1024).toFixed(0)} KB</td></tr>` +
     `<tr><td>schema</td><td class="num">v${v}</td></tr>` +
+    `<tr><td>build</td><td class="num">${BUILD_STAMP}</td></tr>` +
     `<tr><td>delivery</td><td>${EMBEDDED ? "embedded in this file" : "fetched from lgb serve"}</td></tr>` +
     `<tr><td>extraction</td><td>in this page, always</td></tr>`;
   $("stage").textContent = EMBEDDED ? "single file · wasm" : "lgb serve · wasm";
@@ -253,6 +258,10 @@ function render(d) {
 
   const eng = $("engine");
   eng.innerHTML += `<tr><td>page kind</td><td>${esc(d.page_kind)}</td></tr>` +
+    // Whether the submission was judged a pointer or a body, or `null` on the great majority of
+    // pages that carry no discussion at all. Shown because "we decided this page has a body" is a
+    // claim, and a claim you cannot see is one you cannot argue with.
+    `<tr><td>discussion shape</td><td>${esc(String(d.diagnostics.discussion_shape))}</td></tr>` +
     `<tr><td>repeated groups</td><td class="num">${d.group_count}</td></tr>` +
     (d.comment_mask_reverted
       ? '<tr><td class="warn">mask reverted</td><td class="warn">masking left no article, so it was undone</td></tr>'
