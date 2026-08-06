@@ -108,7 +108,13 @@ impl<P: Profile> SanitizedHtml<P> {
 const ALLOWED: &[&str] = &[
     "a", "abbr", "article", "aside", "b", "blockquote", "br", "caption", "cite", "code", "col",
     "colgroup", "dd", "del", "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
-    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "ins", "kbd", "li", "main", "mark", "ol", "p",
+    // `img` was missing here until a test asked whether an image-only `<figure>` survived
+    // serialization. It did not -- and no article had ever carried an image -- while
+    // `element_attrs("img")` and the `P::IMAGES` gate below sat as unreachable code stating the
+    // opposite intent. Absence is invisible in a text-token F1 score, which is why the corpus
+    // ratchet never noticed.
+    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "kbd", "li", "main", "mark", "ol",
+    "p",
     "pre", "q", "s", "samp", "section", "small", "span", "strong", "sub", "summary", "sup",
     "table", "tbody", "td", "tfoot", "th", "thead", "time", "tr", "u", "ul", "var", "wbr",
 ];

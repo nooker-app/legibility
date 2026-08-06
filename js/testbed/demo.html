@@ -219,11 +219,23 @@ function render(d) {
 
   const a = d.article;
   if (a) {
-    // Injected as HTML on purpose: the engine owns sanitization, and if anything executable ever
-    // lands here that is a sanitizer bug worth seeing rather than hiding behind textContent.
-    $("article").innerHTML = a.html || '<p class="note">(empty)</p>';
+    if (a.kind === "discussion-root") {
+      // A link submission has no body, so an empty panel here is the correct answer — but it
+      // reads as a failure. Render what the page actually is: a headline pointing somewhere.
+      const t = (d.metadata && d.metadata.title && d.metadata.title.value) || "(untitled)";
+      $("article").innerHTML =
+        `<p class="note">A link submission: no body of its own.</p>` +
+        (a.url
+          ? `<p><a href="${esc(a.url)}" rel="noreferrer">${esc(t)}</a></p>` +
+            `<p class="note">${esc(a.url)}</p>`
+          : `<p>${esc(t)}</p>`);
+    } else {
+      // Injected as HTML on purpose: the engine owns sanitization, and if anything executable ever
+      // lands here that is a sanitizer bug worth seeing rather than hiding behind textContent.
+      $("article").innerHTML = a.html || '<p class="note">(empty)</p>';
+    }
     $("ameta").textContent =
-      `<${a.tag}> · ${a.prose_len} B prose · confidence ${a.confidence}/10000` +
+      `${a.kind} · <${a.tag}> · ${a.prose_len} B prose · confidence ${a.confidence}/10000` +
       ` · ${a.dropped_subtrees} subtrees dropped` +
       (a.truncated ? " · TRUNCATED" : "") + ` · calibrated ${a.calibrated}`;
   } else {

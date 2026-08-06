@@ -214,8 +214,81 @@ pub fn serialize_region_excluding<P: Profile>(
         }
     }
 
+    collapse_empty_wrappers(&mut out, &mut report);
     (wrap::<P>(out), report)
 }
+
+/// Delete elements that ended up holding nothing.
+///
+/// Every removal rule above works on one node: this text is `Control`, that subtree is `Hidden`,
+/// this element is not on the allowlist. None of them can see that a `<div>` is left with nothing
+/// inside once its children are gone — so a page built out of custom elements and slots, where
+/// almost all the text is button labels, serializes as a skeleton of empty wrappers. A Reddit post
+/// detail page produced ~90 nested empty `<div>`/`<span>` pairs and one paragraph.
+///
+/// Done on the finished string rather than in the walk, because "did this element contribute
+/// anything?" is only answerable after its subtree has been emitted, and buffering per element to
+/// find out would make the serializer's memory proportional to depth × output.
+///
+/// # What survives
+///
+/// Only a tag pair with *nothing but whitespace* between it goes. `<div><img src=…></div>` has
+/// content between the tags and is kept — which is the case that makes the cheaper "subtree has
+/// zero prose" test wrong, since an image-only figure has no prose and must not be dropped.
+/// Table structure is exempt outright: an empty `<td>` is not noise, it is a column.
+fn collapse_empty_wrappers(out: &mut String, report: &mut SerializeReport) {
+    /// Removing one of these would change a table's shape, not just its clutter.
+    const KEEP_EMPTY: [&str; 9] = [
+        "td", "th", "tr", "table", "thead", "tbody", "tfoot", "col", "colgroup",
+    ];
+
+    // Nested empties need more than one sweep: `<div><span></span></div>` only becomes an empty
+    // `<div>` after the `<span>` goes. Bounded so a pathological input cannot spin here.
+    for _ in 0..MAX_COLLAPSE_PASSES {
+        let mut changed = false;
+        let mut result = String::with_capacity(out.len());
+        let mut rest: &str = out;
+        while let Some(lt) = rest.find('<') {
+            let (before, from_lt) = rest.split_at(lt);
+            result.push_str(before);
+            let Some(gt) = from_lt.find('>') else {
+                result.push_str(from_lt);
+                rest = "";
+                break;
+            };
+            let open = &from_lt[..=gt];
+            let name: &str = open
+                .trim_start_matches('<')
+                .split([' ', '>', '/'])
+                .next()
+                .unwrap_or("");
+            let after = &from_lt[gt + 1..];
+            let close = format!("</{name}>");
+            let empty = !name.is_empty()
+                && !name.starts_with('/')
+                && !KEEP_EMPTY.contains(&name)
+                && after.trim_start().starts_with(close.as_str());
+            if empty {
+                // Drop both tags and the whitespace between them.
+                rest = &after.trim_start()[close.len()..];
+                report.dropped_subtrees = report.dropped_subtrees.saturating_add(1);
+                changed = true;
+            } else {
+                result.push_str(open);
+                rest = after;
+            }
+        }
+        result.push_str(rest);
+        *out = result;
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Enough to unwind the deepest wrapper nest seen on a real page, with room to spare. A cap rather
+/// than a fixpoint loop so that adversarial input cannot make this quadratic.
+const MAX_COLLAPSE_PASSES: usize = 32;
 
 /// Direct children of `i` within `[i+1, end)`.
 ///
@@ -232,27 +305,71 @@ fn child_range(arena: &Arena, i: usize, end: usize) -> Vec<usize> {
     kids
 }
 
+/// Emit the attributes the profile allows, from the arena's interned set.
+///
+/// This was a stub until the demo made its absence visible: an `<a>` with no `href` and an `<img>`
+/// with no `src` render as dead text and a broken-image icon. The corpus gate could not see it,
+/// because token-multiset F1 is computed on *text* and an attribute is not text.
+///
+/// Only interned names ([`AttrName`]) can be emitted — the arena does not keep a span for the name
+/// of an attribute the engine never consults, so `data-*` and friends are structurally
+/// unreachable here rather than deliberately filtered. That is a narrower output than the
+/// allowlist describes, and it is the safe direction to be wrong in.
 fn write_attrs<P: Profile>(
     arena: &Arena,
-    _node: usize,
+    node: usize,
     tag: &str,
     out: &mut String,
-    _report: &mut SerializeReport,
+    report: &mut SerializeReport,
 ) {
-    // Attribute storage lands with the metadata subsystem in M3; until then the only attributes
-    // emitted are the ones the profile *forces*, which is the security-relevant half. Emitting a
-    // half-implemented attribute path would be worse than emitting none: it would look done.
-    let _ = arena;
-    if tag == "a" {
+    let mut wrote_rel = false;
+    for a in arena.attrs_of(NodeId(node as u32)) {
+        let name = a.name.as_str();
+        if name.is_empty() || !legibility_sanitize::is_allowed_attr::<P>(tag, name) {
+            continue;
+        }
+        let Some(value) = arena.attr(NodeId(node as u32), a.name) else {
+            continue;
+        };
+        // A URL-valued attribute is the one place a string can become code, so the scheme check
+        // happens here rather than being left to the consumer.
+        let emitted = match name {
+            "href" | "src" => match legibility_sanitize::check_url(value).url {
+                Some(u) => u,
+                None => {
+                    report.rejected_urls = report.rejected_urls.saturating_add(1);
+                    continue;
+                }
+            },
+            // Syntax highlighting survives; `class` as a general channel does not.
+            "class" if tag == "pre" || tag == "code" => match filter_code_class(value) {
+                Some(c) => c,
+                None => continue,
+            },
+            "class" => continue,
+            // Namespaced so that a page-authored `id` cannot collide with the host document's,
+            // which is how DOM clobbering starts.
+            "id" => legibility_sanitize::namespace_id::<P>(value),
+            "rel" if P::FORCED_REL.is_some() => continue,
+            _ => value.to_string(),
+        };
+        if name == "rel" {
+            wrote_rel = true;
+        }
+        out.push(' ');
+        out.push_str(name);
+        out.push_str("=\"");
+        out.push_str(&escape_attr(&emitted));
+        out.push('"');
+    }
+    // `rel` on user content is forced, not merely allowed: a comment must not be able to opt out
+    // of `nofollow noopener noreferrer` by supplying its own.
+    if tag == "a" && !wrote_rel {
         if let Some(rel) = P::FORCED_REL {
             out.push_str(" rel=\"");
             out.push_str(&escape_attr(rel));
             out.push('"');
         }
-    }
-    if tag == "pre" || tag == "code" {
-        // Placeholder for the language class, which needs attribute storage to exist.
-        let _ = filter_code_class("");
     }
 }
 

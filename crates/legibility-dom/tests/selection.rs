@@ -354,3 +354,72 @@ fn a_comment_shaped_class_on_article_prose_is_not_removed_wholesale() {
     let (_, text, _) = extract(html);
     assert!(text.contains("entirely about how comments"), "the guard did not hold: {text}");
 }
+
+#[test]
+fn empty_wrappers_are_collapsed_but_content_carrying_ones_are_not() {
+    // A page built from custom elements and slots, where nearly all the text is button labels,
+    // used to serialize as a skeleton: ~90 nested empty <div>/<span> pairs around one paragraph.
+    // Every per-node rule was right; none of them can see that a container ended up empty.
+    let html = "<html><body><main><div><span></span><div><span>   </span></div>\
+        <p>The one paragraph that actually says something on this page.</p></div></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (h, _) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions::default(),
+    );
+    assert!(!h.as_str().contains("<span"), "empty spans survived: {}", h.as_str());
+    assert!(h.as_str().contains("actually says something"), "content lost: {}", h.as_str());
+}
+
+#[test]
+fn an_image_only_container_and_an_empty_table_cell_both_survive() {
+    // The two cases that make the cheaper rule -- "drop any subtree with zero prose" -- wrong.
+    // An image-only figure has no prose and is content; an empty <td> is a column, not clutter.
+    let html = "<html><body><main><article>\
+        <p>Prose long enough that this region is chosen over anything else on the page here.</p>\
+        <figure><img src=\"/a.png\" alt=\"\"></figure>\
+        <table><tr><td>x</td><td></td></tr></table>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (h, _) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions::default(),
+    );
+    let s = h.as_str();
+    assert!(s.contains("<img"), "an image-only container was dropped: {s}");
+    assert!(s.contains("src=\"/a.png\""), "the image lost its src: {s}");
+    assert!(s.contains("<td></td>"), "an empty table cell was dropped: {s}");
+}
+
+#[test]
+fn links_keep_their_href_and_lose_it_when_the_scheme_is_not_allowed() {
+    // `write_attrs` was a stub, so every link in every article came out as dead text and every
+    // image as a broken icon. Invisible to the corpus gate: token-multiset F1 scores *text*, and
+    // an attribute is not text -- which is why the demo found this and 130 corpus pages did not.
+    let html = "<html><body><main><article>\
+        <p>Body prose long enough to be chosen as the region on this small test page here.</p>\
+        <p><a href=\"https://ok.test/x\">good</a><a href=\"javascript:alert(1)\">bad</a>\
+        <a href=\"data:text/html,hi\">worse</a></p>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (h, rep) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions::default(),
+    );
+    let s = h.as_str();
+    assert!(s.contains("href=\"https://ok.test/x\""), "an allowed href was dropped: {s}");
+    assert!(!s.contains("javascript:"), "a javascript: URL survived: {s}");
+    assert!(!s.contains("data:"), "a data: URL survived: {s}");
+    assert_eq!(rep.rejected_urls, 2, "rejections must be reported, not silent");
+    // The anchor text stays either way: refusing the destination is not a reason to lose the words.
+    assert!(s.contains("bad") && s.contains("worse"), "text lost with the URL: {s}");
+}
