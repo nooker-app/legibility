@@ -423,3 +423,25 @@ fn links_keep_their_href_and_lose_it_when_the_scheme_is_not_allowed() {
     // The anchor text stays either way: refusing the destination is not a reason to lose the words.
     assert!(s.contains("bad") && s.contains("worse"), "text lost with the URL: {s}");
 }
+
+#[test]
+fn indentation_between_tags_does_not_dilute_link_density() {
+    // The mechanism behind a link submission reading as a body. The anchor is wrapped in four
+    // nested divs and the markup is pretty-printed, so every level adds a newline and spaces.
+    // Counting those as prose grew link_density's denominator while its numerator -- the anchor
+    // text -- stayed fixed: 0.87 at the <p>, 0.74 three levels up, under the 0.75 viability
+    // floor. A bare URL then out-massed the title and the page reported a body it does not have.
+    let html = "<html><body><main>\n  <div slot=\"credit-bar\">\n    <a href=\"/r/rss/\">r/rss</a>\n \
+        <time>2d ago</time>\n  </div>\n  <h1>[Github] Free news APIs differ significantly in \
+        historical coverage, languages and search filters</h1>\n  <shreddit-post-text-body>\n    \
+        <div>\n      <div>\n        <div>\n          <p>\n            [<a \
+        href=\"https://github.com/free-news-api/news-api\">\
+        https://github.com/free-news-api/news-api</a>]\n          </p>\n        </div>\n      \
+        </div>\n    </div>\n  </shreddit-post-text-body>\n  <shreddit-comment-tree>\n    \
+        <p>Be the first to comment</p>\n    <p>Nobody's responded to this post yet.</p>\n  \
+        </shreddit-comment-tree>\n</main></body></html>";
+    let (kind, url, text) = extract_shape(html);
+    assert_eq!(kind, "discussion-root", "wrapper indentation made a URL look like a body");
+    assert_eq!(url, "https://github.com/free-news-api/news-api");
+    assert_eq!(text, "", "a pointer must have an empty body, got: {text}");
+}

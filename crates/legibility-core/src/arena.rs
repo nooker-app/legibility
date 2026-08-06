@@ -345,12 +345,27 @@ impl Arena {
         let n = self.len();
         for i in (0..n).rev() {
             // Seed from this node's own text, classified by role.
-            let own = self
-                .text_end
-                .get(i)
-                .copied()
-                .unwrap_or(0)
-                .saturating_sub(self.text_start.get(i).copied().unwrap_or(0));
+            //
+            // A text node that is nothing but whitespace contributes zero. Indentation is not
+            // content, and counting it is not a rounding error: pretty-printed markup puts a
+            // newline and several spaces between every pair of tags, so each wrapper in a chain
+            // adds bytes that are prose by type and furniture in fact. On a Reddit link post the
+            // body is one anchor inside four nested `<div>`s, and the accumulated indentation
+            // diluted `link_density` from 0.87 at the `<p>` to 0.74 three levels up -- under the
+            // viability floor -- which made a bare URL read as a submission body.
+            let start = self.text_start.get(i).copied().unwrap_or(0) as usize;
+            let end = self.text_end.get(i).copied().unwrap_or(0) as usize;
+            let raw = end.saturating_sub(start);
+            let own = if raw == 0
+                || self
+                    .doc_buf
+                    .get(start..end)
+                    .is_some_and(|s| s.chars().all(char::is_whitespace))
+            {
+                0
+            } else {
+                u32::try_from(raw).unwrap_or(u32::MAX)
+            };
 
             match self.text_role.get(i).copied().unwrap_or(TextRole::Prose) {
                 TextRole::Prose => add_at(&mut self.prose_len, i, own),

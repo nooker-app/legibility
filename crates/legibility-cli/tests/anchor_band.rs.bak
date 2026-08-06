@@ -50,30 +50,16 @@ const PER_PAGE_TOLERANCE: f32 = 0.02;
 /// Pages this work knowingly made worse. They are already at their new, lower value in the
 /// baseline; this list records *why*, so the numbers are not mistaken for something anyone chose.
 ///
-/// All six have one cause: whitespace-only text nodes stopped counting as prose. Indentation is
-/// not content, and counting it gave deeply nested, pretty-printed regions a size bonus
-/// proportional to their own nesting. Removing it is a correctness fix — it is what stopped a
-/// bare URL inside four wrapper `<div>`s from reading as a submission body — but it also took
-/// away a thumb on the scale that these six were winning by.
+/// All four have the same cause: `<script>` bytes used to land in `hidden_len`, which pushed the
+/// purity of big outer wrappers below the floor and accidentally forced selection inward. Removing
+/// that was a correctness fix — script source is not text — but it took away a brake the scorer
+/// was leaning on, and the region that now wins carries the headline and byline into the body.
 ///
-/// The trade is recorded rather than argued: **25 pages improved, 6 fell, mean F1 0.8085 →
-/// 0.8285.** Several of the gains are total (msn 0.446 → 1.000, youth 0.621 → 1.000,
-/// yahoo-2 0.685 → 1.000), and the four pages this list used to name — aktualne, webmd-1,
-/// webmd-2, youth — are all healed by the same change, because inflated wrapper lengths were
-/// their cause too.
-///
-/// `bug-1255978` is the one refusal: it now returns `IndexPage` rather than a low-scoring
-/// region. One page in 130 is 0.8%, well under the 5% `refusal_rate` cap, but it is a refusal
-/// and not a near miss, so it is named here.
+/// Two planned pieces close this: region cleaning (M6) strips page furniture from the chosen
+/// region, and plan D4's `lead { byline_span, heading_span }` moves the headline and byline out of
+/// `article.html` into their own fields — precisely the systematic offset being measured here.
 #[allow(dead_code)]
-const KNOWN_REGRESSIONS: [&str; 6] = [
-    "bug-1255978",
-    "ehow-1",
-    "hukumusume",
-    "quanta-1",
-    "simplyfound-1",
-    "wordpress",
-];
+const KNOWN_REGRESSIONS: [&str; 4] = ["aktualne", "webmd-1", "webmd-2", "youth"];
 
 fn corpus() -> Vec<PathBuf> {
     let root =
@@ -196,13 +182,10 @@ fn corpus_mean_f1_does_not_fall_below_what_was_measured() {
         eprintln!("corpus submodule absent; skipping");
         return;
     }
-    // Floor, not a target. Set below the 0.8285 measured once whitespace stopped counting as
-    // prose, with room for the noise a serializer change can introduce, so it catches a real fall
-    // rather than a wobble. Raised from 0.78 with that measurement: a floor that never moves stops
-    // being a ratchet.
-    const FLOOR: f32 = 0.80;
+    // Floor, not a target. Set below the 0.806 measured when the anchor rung landed, with room for
+    // the noise a serializer change can introduce, so it catches a real fall rather than a wobble.
+    const FLOOR: f32 = 0.78;
     let mean = rows.iter().map(|(_, s)| *s).sum::<f32>() / rows.len() as f32;
-    eprintln!("MEAN {mean:.4} over {} pages", rows.len());
     assert!(
         mean >= FLOOR,
         "corpus mean F1 fell to {mean:.4}, below the committed floor {FLOOR}; \
@@ -268,6 +251,5 @@ fn bless_baseline() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/selection-baseline.tsv");
     std::fs::write(&path, out).expect("writing baseline");
     let mean = rows.iter().map(|(_, s)| *s).sum::<f32>() / rows.len() as f32;
-    eprintln!("MEAN {mean:.4} over {} pages", rows.len());
     println!("wrote {} rows to {}, mean F1 {mean:.4}", rows.len(), path.display());
 }
