@@ -60,7 +60,7 @@
 <main>
   <section class="pane">
     <h2>Input</h2>
-    <div class="row">
+    <div class="row" id="urlrow">
       <input type="url" id="url" spellcheck="false" placeholder="https://news.ycombinator.com/item?id=1">
       <button id="go-url">Fetch &amp; extract</button>
     </div>
@@ -124,8 +124,23 @@ const EMBEDDED = !WASM_BASE64.startsWith("/*");
 // did not work, and twice now a demo report has been read that way when the page was running a
 // module compiled before the fix. A file timestamp cannot be seen from inside the browser; this can.
 const BUILD_STAMP = "/*__BUILD_STAMP__*/";
+// A static deploy: the module travels inside this file, and there is no process anywhere that could
+// fetch a URL on the page's behalf. That is precisely GitHub Pages, and it is a third state --
+// `file://` is also embedded but a helper on the same machine may be reachable there, while
+// `lgb serve` is over http but not embedded. Deriving it beats a build-time flag, because one
+// artifact is then correct opened three ways and there is no profile to get wrong.
+const STATIC = EMBEDDED && (location.protocol === "http:" || location.protocol === "https:");
 
 const $ = (id) => document.getElementById(id);
+
+// Hidden here rather than in `initWasm`, which only reaches its own end when the module loads. With
+// it there, a failed instantiate left the URL field on screen; pressing it GETs `<pages-host>/fetch`
+// -- `helperBase()` returns "" for http(s) -- and loads a 404 page into the textarea. The control
+// must be gone because the helper cannot exist, which is true before any module is loaded.
+if (STATIC) {
+  $("urlrow").hidden = true;
+  $("portrow").hidden = true;
+}
 
 function b64ToBytes(b64) {
   const bin = atob(b64);
@@ -158,13 +173,26 @@ async function initWasm() {
     `<tr><td>build</td><td class="num">${BUILD_STAMP}</td></tr>` +
     `<tr><td>delivery</td><td>${EMBEDDED ? "embedded in this file" : "fetched from lgb serve"}</td></tr>` +
     `<tr><td>extraction</td><td>in this page, always</td></tr>`;
-  $("stage").textContent = EMBEDDED ? "single file · wasm" : "lgb serve · wasm";
-  $("urlnote").innerHTML = EMBEDDED
+  $("stage").textContent = STATIC ? "static · wasm" : EMBEDDED ? "single file · wasm" : "lgb serve · wasm";
+  $("urlnote").innerHTML = STATIC
+    ? 'Everything here runs in your browser. <strong>URL input is not offered</strong>: a page ' +
+      'cannot fetch another site (CORS), and the only ways around that are a server we will not ' +
+      'run or a third-party proxy we will not send your reading through. Paste HTML, or save a ' +
+      'page (⌘S) and drop the file in.'
+    : EMBEDDED
     ? 'Opened from disk. Everything except URL fetching needs nothing at all; for a URL, run ' +
       '<code>lgb serve</code> and this page will ask it to fetch — your machine only, no third party.'
     : 'Served by <code>lgb serve</code>, which fetches URLs for you. It does not extract: the ' +
       'engine below is the same WebAssembly module the single-file build embeds.';
   if (!EMBEDDED) $("portrow").hidden = true;
+  // A stale module is the one failure that looks exactly like a bug in the engine, so say so where
+  // the answer is being read rather than only in a terminal the reader may not have.
+  if (BUILD_STAMP.startsWith("STALE")) {
+    $("urlnote").innerHTML =
+      '<span class="err"><strong>Stale module.</strong> ' + esc(BUILD_STAMP) + ' — rebuild with ' +
+      '<code>cargo build --release -p legibility-wasm --target wasm32-unknown-unknown</code>. ' +
+      'What you see below is the OLD engine.</span><br>' + $("urlnote").innerHTML;
+  }
 }
 
 function extract(html) {
@@ -381,6 +409,14 @@ function helperBase() {
 }
 
 async function runUrl() {
+  // The one guard that matters on a static deploy, placed at the entry point rather than on the
+  // button: `#url=` reaches this function directly, so hiding the control is not enough.
+  if (STATIC) {
+    $("article").innerHTML =
+      '<p class="err">URL fetching needs a helper on your own machine, and there is none here. ' +
+      'Paste the HTML, or save the page and drop the file in.</p>';
+    return;
+  }
   const url = $("url").value.trim();
   if (!url) return;
   for (const b of [$("go"), $("go-url")]) b.disabled = true;

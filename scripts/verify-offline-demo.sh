@@ -120,6 +120,14 @@ if [ ! -x ./target/release/lgb ] || [ ! -x "$CHROME" ]; then
   printf '  SKIP  url-from-file:// not checked\n'
 else
   ORIGIN_PORT=8897
+  # An interrupted earlier run leaves its origin server bound, and the next run then fetches a 404
+  # from a directory that no longer exists and reports "could not fetch through the local helper" --
+  # a true statement about a cause that is not the one named. Say what is actually wrong instead.
+  if lsof -nP -iTCP:"$ORIGIN_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    printf '  FAIL  port %s is already in use; a leaked server would answer 404\n' "$ORIGIN_PORT"
+    printf '        kill it with:  lsof -tiTCP:%s -sTCP:LISTEN | xargs kill\n' "$ORIGIN_PORT"
+    fail=1
+  fi
   tmp=$(mktemp -d)
   cat > "$tmp/page.html" <<'HTML'
 <!doctype html><html><head><title>Fetched through the helper</title></head><body>

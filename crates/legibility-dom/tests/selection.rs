@@ -632,3 +632,50 @@ fn inline_emphasis_survives_and_custom_elements_still_do_not() {
     assert!(!s.contains("my-widget"), "a custom element kept its tag: {s}");
     assert!(s.contains("loses its tag"), "custom element text was dropped: {s}");
 }
+
+#[test]
+fn a_label_beside_the_headline_goes_but_never_the_body_with_it() {
+    // Removing a duplicate `<h1>` leaves its siblings behind, and on a discussion page a sibling is
+    // a category chip: beebs.hada.io put `질문` at the top of every extracted body. Two characters,
+    // which is why it survived several rounds of that page being reported.
+    let chip = "<html><head><title>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</title></head>\
+        <body><main><article>\
+        <header><div class=\"title-line\"><span class=\"category-chip\">질문</span>\
+          <h1>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</h1></div></header>\
+        <div class=\"body\"><p>어쩌다가 카톡의 인앱 브라우저로 로그인을 시도했는데 패스키는 동작을 \
+          안하더라고요. 다른 분들은 잘 되시는지 궁금합니다.</p></div>\
+        </article></main></body></html>";
+    let (_, text, _) = extract(chip);
+    assert!(!text.contains('질'), "the category chip survived: {text}");
+    assert!(text.contains("동작을"), "the body was lost: {text}");
+
+    // The first version of that rule ascended to the heading's *wrapper* and excluded it, which is a
+    // more natural way to say "the title line" and deletes articles: a body of 24 bytes puts the
+    // wrapper inside the slack, and the wrapper spans the whole region. This came back with
+    // `html: ""` -- an article reported as found, containing nothing.
+    let short = "<html><head><title>Passkeys in in-app browsers are broken</title></head><body>\
+        <article><div class=\"post\">\
+        <h1>Passkeys in in-app browsers are broken</h1>\
+        <p>Yes, confirmed here too.</p>\
+        </div></article></body></html>";
+    let (_, short_text, _) = extract(short);
+    assert!(
+        short_text.contains("confirmed here too"),
+        "a short body was excluded along with the headline: {short_text:?}"
+    );
+
+    // And a one-line dek is content, not furniture. It is a `<p>`, which is the author saying so,
+    // and it sits beside the heading's wrapper where a chip sits beside the heading itself.
+    let dek = "<html><head><title>Why Neon Is Fading</title></head><body><article>\
+        <div class=\"outer\">\
+          <div class=\"mid\"><header><span class=\"kicker\">Design</span>\
+            <h1>Why Neon Is Fading</h1></header></div>\
+          <p class=\"dek\">Neon, briefly.</p>\
+        </div>\
+        <div class=\"body\"><p>Neon lighting was invented in 1910 and spread through every city \
+          centre before the cheaper alternatives arrived.</p></div>\
+        </article></body></html>";
+    let (_, dek_text, _) = extract(dek);
+    assert!(dek_text.contains("Neon, briefly"), "the dek was eaten: {dek_text}");
+    assert!(!dek_text.contains("Design"), "the kicker survived: {dek_text}");
+}

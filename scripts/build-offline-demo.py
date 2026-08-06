@@ -49,7 +49,13 @@ def build_wasm() -> Path:
 
 
 def main() -> int:
-    out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "js/testbed/legibility-offline.html"
+    # Resolved, so a relative argument works. `dist/index.html` is how the gh-pages bundle is built,
+    # and the `relative_to(ROOT)` in the report below raises on a path that is not already absolute.
+    out_path = (
+        Path(sys.argv[1]).resolve()
+        if len(sys.argv) > 1
+        else ROOT / "js/testbed/legibility-offline.html"
+    )
     wasm = build_wasm()
     b64 = base64.b64encode(wasm.read_bytes()).decode("ascii")
     template = TEMPLATE.read_text(encoding="utf-8")
@@ -81,7 +87,8 @@ def main() -> int:
     out_path.write_text(html, encoding="utf-8")
 
     size = out_path.stat().st_size
-    print(f"  wrote {out_path.relative_to(ROOT)}  ({size // 1024} KB, single file, no server)")
+    shown = out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path
+    print(f"  wrote {shown}  ({size // 1024} KB, single file, no server)")
     # Anything the page loads from the network would break the offline promise, so check rather
     # than trust: no src/href pointing outward, no import, no fetch of a URL.
     lowered = html.lower()

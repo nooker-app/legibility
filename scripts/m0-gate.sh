@@ -17,6 +17,13 @@ chk "iOS reachability: aarch64-apple-ios-sim"    "cargo build -q --release -p le
 chk "no direct recursion in core"                "python3 scripts/check-no-recursion.py"
 chk "no third-party .html committed (D9)"        "[ \"\$(git ls-files corpus/ | grep -c '\\.html\$')\" = 0 ]"
 chk "extern \"C\" bodies wrapped (S1/§1.11.2)"     "python3 scripts/ffi-audit.py"
+# The demo's CNAME guard (§1.12.2). Here rather than only in the Pages workflow because the danger
+# is a *committed* CNAME: a custom domain belongs to one repository, so one landing on main would
+# move www.nooker.app off nooker-web and take production down. Cheap, and needs no bundle.
+# An explicitly absent bundle directory, so only the CNAME leg can decide this. Pointed at a real
+# `dist/`, any of the six checks could fail it and `chk` swallows the output, so a developer with a
+# leftover bundle would read "no CNAME" for an absolute-path problem.
+chk "no CNAME anywhere (§1.12.2)"                 "scripts/pages-guard.sh .m0-no-bundle >/dev/null"
 chk "corpus submodule pinned to expected SHA"    "[ \"\$(git -C corpus/readability rev-parse HEAD)\" = ab4027a8b37669745016869a37a504727992b2ba ]"
 chk "tier_a case count matches manifest"         "[ \"\$(ls corpus/readability/test/test-pages | wc -l | tr -d ' ')\" = 130 ]"
 

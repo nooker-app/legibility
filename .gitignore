@@ -21,3 +21,7 @@ js/testbed/pkg/
 .claude/scheduled_tasks.lock
 .claude/**/*.lock
 js/testbed/legibility-offline.html
+
+# The gh-pages bundle: a build product of scripts/build-offline-demo.py, and 871 KB of base64 that
+# would otherwise land in a permanent history every time the demo changes.
+/dist/

@@ -1,14 +1,14 @@
 {
   "schema_version":1,
   "article":{
-    "html":"<article><div><span>질문</span></div><div><p>어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요</p><p>RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요</p></div></article>",
-    "text":"질문 어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요 RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요",
+    "html":"<article><div><p>어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요</p><p>RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요</p></div></article>",
+    "text":"어쩌다가 카톡의 인앱 브라우저로 BeeBS에 로그인을 시도했는데 패스키는 동작을 안하더라고요 RSS 리더앱으로도 똑같이 동작해서 저는 그냥 안되나보다 하고 있지만 혹시 다른분들은 잘 되시는지 궁금하네요",
     "tag":"article",
     "kind":"article",
     "url":null,
-    "prose_len":279,
+    "prose_len":273,
     "confidence":8142,
-    "dropped_subtrees":6,
+    "dropped_subtrees":8,
     "unwrapped":1,
     "truncated":false,
     "dispersion_floor":false,

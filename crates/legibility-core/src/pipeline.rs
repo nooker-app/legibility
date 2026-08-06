@@ -151,6 +151,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         if let Some(declared) = declared_title(&metadata) {
             if let Some(h) = duplicate_heading(arena, region, declared) {
                 article_exclusions.push(h);
+                article_exclusions.extend(headline_furniture(arena, region, h));
             }
         }
     }
@@ -403,6 +404,102 @@ fn duplicate_heading(arena: &Arena, region: crate::NodeId, title: &str) -> Optio
         return restates(&want, &heading).then_some(crate::NodeId(i as u32));
     }
     None
+}
+
+/// Longest a label beside the headline may be and still count as furniture.
+///
+/// A category chip, a flair, a byline word, a reading-time badge — never a sentence. Eight Korean
+/// characters or twenty-four ASCII ones.
+const HEADLINE_SLACK: u32 = 24;
+
+/// Micro-labels sharing the headline's parent, which are furniture once the headline is gone.
+///
+/// Excluding an `<h1>` leaves its *siblings* in the body, and on a discussion page a sibling is a
+/// label. beebs.hada.io renders
+///
+/// ```text
+///   <div class="thread-detail-title-line">
+///     <span class="category-chip">질문</span>
+///     <h1>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</h1>
+///   </div>
+/// ```
+///
+/// so excluding the `<h1>` alone left `질문` — two characters of category label — as the first thing
+/// in the body. Two characters look like a rounding error and are not: they are an artifact of a
+/// removal this code performed.
+///
+/// # Why siblings and not the wrapper
+///
+/// The first attempt ascended to the outermost ancestor whose prose exceeded the heading's by less
+/// than [`HEADLINE_SLACK`] and excluded *that*. It is a much more natural way to say "the title
+/// line", and it deletes articles. Review found it in one page:
+///
+/// ```text
+///   <article><div class="post">
+///     <h1>Passkeys in in-app browsers are broken</h1>
+///     <p>Yes, confirmed here too.</p>
+///   </div></article>
+/// ```
+///
+/// A body of twenty-four bytes puts `div.post` inside the bound, `div.post` spans the whole region,
+/// and the extraction came back with `html: ""` — an article reported as found, containing nothing,
+/// with no diagnostic saying why. A short comment-shaped page is not a rare thing to meet.
+///
+/// Excluding only siblings cannot do that, whatever the constant is: an ancestor is never a
+/// candidate, so no subtree containing the body can be named. The bound is then about precision
+/// alone rather than about safety, which is the right thing for a constant to be about.
+fn headline_furniture(
+    arena: &Arena,
+    region: crate::NodeId,
+    heading: crate::NodeId,
+) -> alloc::vec::Vec<crate::NodeId> {
+    let mut out = alloc::vec::Vec::new();
+    // The headline's parent: the innermost element that precedes it and whose subtree reaches past
+    // it. Document order plus contiguous subtrees make "innermost" simply the largest such index.
+    let Some(parent) = (region.idx() + 1..heading.idx())
+        .rev()
+        .find(|&a| {
+            arena.kind.get(a).copied() == Some(crate::NodeKind::Element)
+                && (arena.subtree_end.get(a).copied().unwrap_or(0) as usize) > heading.idx()
+        })
+        .map(|a| crate::NodeId(a as u32))
+    else {
+        return out;
+    };
+
+    let parent_end =
+        (arena.subtree_end.get(parent.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    let mut taken = 0u32;
+    let mut c = parent.idx() + 1;
+    while c < parent_end {
+        let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
+        let prose = arena.prose_len.get(c).copied().unwrap_or(0);
+        if arena.kind.get(c).copied() == Some(crate::NodeKind::Element)
+            && c != heading.idx()
+            && prose > 0
+            && prose <= HEADLINE_SLACK
+            // A paragraph is content by declaration, however short. The author wrote `<p>`; a chip
+            // is a `<span>` or a `<div>`, and the distinction is the site's own rather than ours.
+            // Without this, `<h1>…</h1><p>Yes, confirmed here too.</p>` -- twenty-four bytes, so
+            // inside the bound -- loses the reply that is the entire page.
+            && !matches!(arena.tag.get(c).copied(), Some(crate::TagId::P))
+        {
+            out.push(crate::NodeId(c as u32));
+            taken += prose;
+        }
+        c = child_end;
+    }
+
+    // A removal must leave prose behind. The same invariant guards comment-section removal, for the
+    // same reason: every rule here is a heuristic, and the cost of one being wrong should be a
+    // stray label rather than an empty article reported as a full one. Cheap, and it makes the
+    // bound above a question of precision rather than of safety.
+    let region_prose = arena.prose_len.get(region.idx()).copied().unwrap_or(0);
+    let heading_prose = arena.prose_len.get(heading.idx()).copied().unwrap_or(0);
+    if region_prose <= heading_prose.saturating_add(taken) {
+        out.clear();
+    }
+    out
 }
 
 /// Share of a heading's text that the title already contains, tested against 0.75.

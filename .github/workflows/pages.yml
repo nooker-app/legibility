@@ -1,0 +1,104 @@
+# Publish the demo to https://nooker-app.github.io/legibility/ (plan §1.12).
+#
+# # The isolation this workflow has to preserve
+#
+# GitHub Pages is per repository, so serving from here cannot reach `nooker-web` or `nook` by
+# accident — different repos, different source branches, different paths. There is exactly one way
+# to break production, and it is a custom domain: GitHub binds one to a single repository, so a
+# CNAME here would move `www.nooker.app` off `nooker-web` and take the site down. `pages-guard.sh`
+# fails the build on a CNAME anywhere, and it runs *before* anything is published.
+#
+# Two smaller disciplines follow from the same worry:
+#
+#   * the default `GITHUB_TOKEN` with `contents: write`, and nothing else. No org-scoped PAT and no
+#     `repository_dispatch`, so there is no credential in this job that *could* write to another
+#     repository even if the steps were wrong.
+#   * `concurrency` keyed to this workflow in this repo, and a force-push that names `gh-pages`
+#     explicitly rather than relying on a default.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install binaryen
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      - name: Build the bundle
+        run: python3 scripts/build-offline-demo.py dist/index.html
+
+      # Before publishing, not after. A guard that runs on the deployed branch has already let the
+      # thing it guards against reach the internet.
+      - name: Guards
+        run: scripts/pages-guard.sh dist
+
+      # What the bundle *does*, served under a path prefix by a server with no fetch endpoint. The
+      # guards above read the file; this one is the only thing that can tell whether the page still
+      # extracts and still declines to offer a control that would call this host looking for a
+      # helper. Skips itself if no browser is present rather than failing.
+      - name: Behaviour
+        run: scripts/verify-pages-demo.sh dist
+
+      # A throwaway repository *inside* `dist`, rather than an orphan branch in the checkout. The
+      # published tree is then exactly the bundle with no path juggling to get wrong, and there is
+      # no sequence of steps here that can commit anything from the source checkout.
+      - name: Publish to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The guard checked the worktree, the bundle and the existing branch; this checks what is
+          # about to be committed. A CNAME must not exist at any point in the chain.
+          if [ -e dist/CNAME ]; then echo "refusing: dist/CNAME"; exit 1; fi
+          # `.nojekyll` so Pages serves the tree as-is. Without it Jekyll skips paths it considers
+          # special and the failure mode is a silent 404.
+          touch dist/.nojekyll
+          cd dist
+          git init -q -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "demo: ${GITHUB_SHA:0:7}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" gh-pages
+
+      # Pushing the branch is not publishing. Which branch Pages serves lives in repo settings and
+      # needs `pages: write` plus the Pages API to set or even read — with `contents: write` alone
+      # this job cannot know, so it asks the internet instead of assuming. Without this step the run
+      # goes green on a repo where Pages was never enabled and the summary links to a 404.
+      - name: Confirm it is actually served
+        run: |
+          set -uo pipefail
+          URL=https://nooker-app.github.io/legibility/
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            if [ "$code" = 200 ]; then
+              echo "$URL is live" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $i: HTTP $code"
+            sleep 10
+          done
+          {
+            echo "### The bundle was pushed but $URL does not serve it"
+            echo
+            echo "Enable Pages once, by hand: Settings → Pages → Source: *Deploy from a branch*,"
+            echo "branch \`gh-pages\`, folder \`/\`. Do **not** set a custom domain — see §1.12.2."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
