@@ -143,7 +143,14 @@ pub fn decide(
     // to comment. Nobody's responded to this post yet.") came to 190 bytes and the house ad to
     // 183, against a 108-byte title, so a link submission with no body at all reported two
     // separate bodies before the first one won.
-    let (start, end) = submission_container(arena, region, region_end, title);
+    let container = submission_container(arena, region, region_end, title);
+    let (start, end) = match container {
+        Some(c) => (
+            c.idx(),
+            (arena.subtree_end.get(c.idx()).copied().unwrap_or(0) as usize).min(region_end),
+        ),
+        None => (region.idx() + 1, region_end),
+    };
 
     let mut body: Option<NodeId> = None;
     let mut body_prose = 0u32;
@@ -192,7 +199,12 @@ pub fn decide(
     // A body says more than its own headline. Everything that fails this is furniture: the
     // credit bar, the score, a timestamp line, a caption -- and on a link submission, the
     // pasted URL with its brackets.
-    if body_prose > title_prose {
+    //
+    // `LinkOnly` additionally requires somewhere to point. Without that clause a page whose
+    // heading sits alone in a header block reports a pointer with no destination, and the
+    // serializer's answer to a pointer is an empty body -- so a misjudgement here does not
+    // degrade the article, it deletes it. A pointer that points nowhere is not a pointer.
+    if body_prose > title_prose || link.is_none() {
         Some(Shape {
             kind: DiscussionShape::WithBody,
             title,
@@ -271,23 +283,18 @@ fn submission_container(
     region: NodeId,
     region_end: usize,
     title: NodeId,
-) -> (usize, usize) {
-    let whole = (region.idx() + 1, region_end);
+) -> Option<NodeId> {
     let mut c = region.idx() + 1;
     while c < region_end {
         let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
         if title.idx() >= c && title.idx() < child_end {
             // The title being the child itself means the submission is spread across the region's
             // children rather than gathered into one, so there is no container to narrow to.
-            return if c == title.idx() {
-                whole
-            } else {
-                (c, child_end.min(region_end))
-            };
+            return (c != title.idx()).then_some(NodeId(c as u32));
         }
         c = child_end;
     }
-    whole
+    None
 }
 
 /// Prose of `node`'s subtree with the excluded subtrees inside it subtracted.

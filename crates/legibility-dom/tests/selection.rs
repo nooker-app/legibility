@@ -483,3 +483,84 @@ fn comment_furniture_and_an_ad_do_not_become_the_submission_body() {
     assert_eq!(url, "https://github.com/free-news-api/news-api");
     assert_eq!(text, "", "a link submission must not carry a body");
 }
+
+#[test]
+fn a_heading_that_only_repeats_the_title_is_dropped_but_a_differing_one_is_kept() {
+    // Readability drops a heading that restates the title, so the corpus `expected.html` files
+    // were produced without it -- keeping it was scored as if we had invented text. It is also
+    // the duplicated headline in front of every discussion body.
+    let dup = "<html><head><title>Free news APIs differ in coverage</title></head><body><main>\
+        <article><h1>Free news APIs differ in coverage</h1>\
+        <p>The body itself, long enough to carry this region past anything else here.</p>\
+        </article></main></body></html>";
+    let (_, text, _) = extract(dup);
+    assert!(!text.contains("Free news APIs"), "the restated title survived: {text}");
+    assert!(text.contains("The body itself"), "the body was lost: {text}");
+
+    // The guard that matters: when `<title>` and `<h1>` disagree the heading is real content.
+    // Comparing a heading against a title *harvested from that heading* always matches, which is
+    // how the corpus page named for this discrepancy lost its `<h1>`.
+    let differs = "<html><head><title>Site name — section</title></head><body><main>\
+        <article><h1>A headline the title tag never mentions</h1>\
+        <p>The body itself, long enough to carry this region past anything else here.</p>\
+        </article></main></body></html>";
+    let (_, text2, _) = extract(differs);
+    assert!(text2.contains("never mentions"), "a real heading was dropped: {text2}");
+}
+
+#[test]
+fn blank_line_soup_is_collapsed_without_welding_inline_words_together() {
+    // Dropping an element takes its tags and the whitespace between them, but not the indentation
+    // on either side, so each removed wrapper left a newline behind. A Reddit post came out as
+    // three paragraphs adrift in fifty blank lines: correct, and indistinguishable from broken.
+    //
+    // The second half is the safety property. Only runs containing a line break are collapsed,
+    // because the whitespace separating two inline elements on one line is a plain space, and
+    // collapsing that would join two words into one.
+    let html = "<html><body><main><article>\
+        <div>\n   <span></span>\n   <span>  </span>\n   </div>\
+        <p>A paragraph long enough to carry this region past everything else on the page.</p>\
+        <p><em>one</em> <em>two</em></p>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (h, _) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions::default(),
+    );
+    let s = h.as_str();
+    assert!(!s.contains("\n\n"), "blank runs survived: {s:?}");
+    assert!(s.contains("<em>one</em> <em>two</em>"), "inline words were welded: {s:?}");
+}
+
+#[test]
+fn inline_emphasis_survives_and_custom_elements_still_do_not() {
+    // The serializer read `TagId::known_name`, which resolves only the elements the *scorer*
+    // interns as integers. Everything else -- em, strong, b, i, mark, abbr, sub, sup, figure --
+    // came back nameless and was unwrapped out of every article on the web. It read as correct
+    // because that same path is what unwraps custom elements, which genuinely should go, and
+    // because emphasis is invisible to a token-multiset F1 score.
+    let html = "<html><body><main><article>\
+        <p>A paragraph long enough to carry this region past everything else on this page.</p>\
+        <p>With <em>emphasis</em>, <strong>weight</strong>, <mark>a mark</mark> and \
+          <abbr title=\"HyperText\">HT</abbr>.</p>\
+        <my-widget><p>Inside a custom element, which keeps its text and loses its tag.</p>\
+          </my-widget>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (h, _) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions::default(),
+    );
+    let s = h.as_str();
+    for tag in ["<em>", "<strong>", "<mark>", "<abbr"] {
+        assert!(s.contains(tag), "{tag} was unwrapped: {s}");
+    }
+    assert!(!s.contains("my-widget"), "a custom element kept its tag: {s}");
+    assert!(s.contains("loses its tag"), "custom element text was dropped: {s}");
+}

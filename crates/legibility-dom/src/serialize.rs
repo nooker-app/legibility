@@ -9,7 +9,7 @@
 //! policy allowed, not what a filter later removed.
 
 use legibility_core::a11y::TextRole;
-use legibility_core::{Arena, NodeId, NodeKind, TagId};
+use legibility_core::{Arena, NodeId, NodeKind};
 use legibility_sanitize::{
     escape_attr, escape_text, filter_code_class, is_void, wrap, Profile, SanitizedHtml,
 };
@@ -88,11 +88,14 @@ pub fn serialize_region_excluding<P: Profile>(
     let start = region.idx();
 
     // (arena index, close-tag to emit on exit)
-    enum Step {
+    // `Close` borrows the element name from the arena rather than owning it. A `&'static str`
+    // would have been enough while only the interned table was consulted, and that restriction is
+    // precisely what silently unwrapped every dynamically interned element.
+    enum Step<'a> {
         Open(usize),
-        Close(&'static str),
+        Close(&'a str),
     }
-    let mut stack: Vec<Step> = vec![Step::Open(start)];
+    let mut stack: Vec<Step<'_>> = vec![Step::Open(start)];
     // Depth of currently open emitted elements, for the render cap.
     let mut open_depth: u16 = 0;
 
@@ -130,8 +133,15 @@ pub fn serialize_region_excluding<P: Profile>(
                         }
                     }
                     NodeKind::Element => {
-                        let tag = arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN);
-                        let name = tag.known_name().unwrap_or("");
+                        // `tag_name`, not `TagId::known_name`. The interned table holds only the
+                        // elements the *scorer* needs to compare as integers; everything else is
+                        // interned dynamically and `known_name` returns `None` for it. Reading the
+                        // narrower one gave an empty name to `em`, `strong`, `b`, `i`, `mark`,
+                        // `abbr`, `sub`, `sup` and `figure`, so all of them were unwrapped out of
+                        // every article. It looked correct because the same path is what unwraps
+                        // custom elements, which genuinely should go, and because emphasis is
+                        // invisible to a text-token F1 score.
+                        let name = arena.tag_name(NodeId(i as u32)).unwrap_or("");
 
                         // Excluded subtrees (comments, when the region encloses them) go first:
                         // they are a caller's decision about content, not a property of the node,
@@ -215,6 +225,7 @@ pub fn serialize_region_excluding<P: Profile>(
     }
 
     collapse_empty_wrappers(&mut out, &mut report);
+    collapse_blank_runs(&mut out);
     (wrap::<P>(out), report)
 }
 
@@ -289,6 +300,33 @@ fn collapse_empty_wrappers(out: &mut String, report: &mut SerializeReport) {
 /// Enough to unwind the deepest wrapper nest seen on a real page, with room to spare. A cap rather
 /// than a fixpoint loop so that adversarial input cannot make this quadratic.
 const MAX_COLLAPSE_PASSES: usize = 32;
+
+/// Reduce every whitespace run that spans a line break to a single newline.
+///
+/// Removing an element takes its tags and the whitespace *between* them, but not the indentation
+/// that sat on either side — so each dropped wrapper leaves its own two-space-and-a-newline
+/// behind, and a page built from deeply nested custom elements serializes as a few paragraphs
+/// adrift in fifty blank lines. The output was correct and looked broken, which for a reader view
+/// is the same thing.
+///
+/// A run *without* a line break is left exactly as it is. That is the whole safety argument: the
+/// only whitespace that separates two inline elements on one line is a plain space, and collapsing
+/// that could weld two words together. Anything spanning a newline is pretty-printer output, which
+/// HTML itself already renders as a single space.
+fn collapse_blank_runs(out: &mut String) {
+    let mut result = String::with_capacity(out.len());
+    let mut rest: &str = out;
+    while let Some(pos) = rest.find('\n') {
+        // Back up over the whitespace preceding the newline, forward over what follows it.
+        let start = rest[..pos].trim_end_matches([' ', '\t', '\r']).len();
+        let (head, tail) = rest.split_at(start);
+        result.push_str(head);
+        result.push('\n');
+        rest = tail.trim_start_matches([' ', '\t', '\r', '\n']);
+    }
+    result.push_str(rest);
+    *out = result;
+}
 
 /// Direct children of `i` within `[i+1, end)`.
 ///
@@ -378,7 +416,7 @@ fn write_attrs<P: Profile>(
 mod tests {
     use super::*;
     use crate::BuildArena;
-    use legibility_core::Limits;
+    use legibility_core::{Limits, TagId};
     use legibility_sanitize::{Article, UserContent};
 
     fn html_of<P: Profile>(src: &str) -> String {

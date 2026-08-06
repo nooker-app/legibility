@@ -123,6 +123,8 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         None => Vec::new(),
     };
 
+    let metadata = meta::extract(arena);
+
     // A discussion is a page with replies *or* with the furniture that would hold them. The
     // second half matters: a link submission with zero replies still has a comment section, and
     // that is exactly the page whose "article" was a credit bar and a URL.
@@ -131,13 +133,31 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         .article
         .and_then(|region| shape::decide(arena, region, &article_exclusions, is_discussion));
 
+    // A heading that only repeats the page title is not content -- and it is added *after* the
+    // shape decision on purpose. `shape::decide` finds the submission title by scanning for the
+    // first heading and skips excluded subtrees, so excluding the heading first would make it
+    // anchor on the next one down and change the decision it is supposed to be reporting.
+    let mut article_exclusions = article_exclusions;
+    if let Some(region) = selection.article {
+        // Compare against a title the *document* declared, never one harvested from a heading.
+        // An `<h1>` candidate outranks `<title>` for the metadata field, so comparing the heading
+        // against the winning candidate is circular and matches every time -- which is how the
+        // corpus page named `title-and-h1-discrepancy` lost the `<h1>` that Readability keeps.
+        // Readability compares against `document.title` for the same reason.
+        if let Some(declared) = declared_title(&metadata) {
+            if let Some(h) = duplicate_heading(arena, region, declared) {
+                article_exclusions.push(h);
+            }
+        }
+    }
+
     Outcome {
         shape,
         selection,
         comment_prose_share: thread
             .map_or(0.0, |g| guarded_div(g.prose_len as f32, page_prose as f32)),
         comments,
-        metadata: meta::extract(arena),
+        metadata,
         is_listing: listing,
         comment_mask_reverted: reverted,
         group_count: u32::try_from(groups.len()).unwrap_or(u32::MAX),
@@ -310,6 +330,99 @@ fn subtree_text_lower(arena: &Arena, node: crate::NodeId) -> alloc::string::Stri
             for c in arena.own_text(crate::NodeId(i as u32)).chars() {
                 out.extend(c.to_lowercase());
             }
+        }
+    }
+    out
+}
+
+/// The best title the document states about itself, excluding any taken from a heading.
+///
+/// `<title>`, `og:title`, JSON-LD and microdata are the publisher declaring a title. An `<h1>` is
+/// the page *displaying* one, so it cannot serve as the yardstick for deciding whether a heading is
+/// redundant.
+fn declared_title(m: &Metadata) -> Option<&str> {
+    core::iter::once(m.title.as_ref())
+        .flatten()
+        .chain(
+            m.alternatives
+                .iter()
+                .filter(|(field, _)| *field == "title")
+                .map(|(_, c)| c),
+        )
+        .filter(|c| c.source != meta::Source::H1)
+        .max_by_key(|c| c.confidence)
+        .map(|c| c.value.as_str())
+}
+
+/// The region's leading heading, when it says nothing the page title has not already said.
+///
+/// Readability drops such a heading (`_headerDuplicatesTitle`), so the corpus `expected.html`
+/// files were produced without it and every page where we keep it is scored as if we invented
+/// text. It also accounts for the duplicated headline in front of every discussion body: the
+/// title is already a metadata field with provenance, and repeating it inside the article is not
+/// an extra fact.
+///
+/// Deliberately narrow. Only the first `h1`/`h2` carrying prose is considered, and only exact
+/// equality after folding — Readability uses a 75%-similarity test, which would let a heading go
+/// that merely resembles the title, and losing a real heading is worse than keeping a redundant
+/// one. Plan D4 reports the span as `lead.heading_span`; this is the removal half only.
+fn duplicate_heading(arena: &Arena, region: crate::NodeId, title: &str) -> Option<crate::NodeId> {
+    let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    let want = fold(title);
+    if want.is_empty() {
+        return None;
+    }
+    for i in (region.idx() + 1)..end {
+        if arena.kind.get(i).copied() != Some(crate::NodeKind::Element) {
+            continue;
+        }
+        if !matches!(
+            arena.tag.get(i).copied(),
+            Some(crate::TagId::H1 | crate::TagId::H2)
+        ) {
+            continue;
+        }
+        if arena.prose_len.get(i).copied().unwrap_or(0) == 0 {
+            continue;
+        }
+        return (fold(&node_prose(arena, i)) == want).then_some(crate::NodeId(i as u32));
+    }
+    None
+}
+
+/// Prose text of a subtree, whitespace-collapsed.
+fn node_prose(arena: &Arena, node: usize) -> alloc::string::String {
+    let end = (arena.subtree_end.get(node).copied().unwrap_or(0) as usize).min(arena.len());
+    let mut out = alloc::string::String::new();
+    for i in node..end {
+        if arena.kind.get(i).copied() != Some(crate::NodeKind::Text) {
+            continue;
+        }
+        if arena.text_role.get(i).copied().is_none_or(|r| !r.is_prose()) {
+            continue;
+        }
+        for w in arena.own_text(crate::NodeId(i as u32)).split_whitespace() {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(w);
+        }
+    }
+    out
+}
+
+/// Case- and whitespace-insensitive form for comparing a heading against a title.
+///
+/// No NFKC: plan §M3 forbids it, because folding full-width to ASCII changes CJK text rather than
+/// normalising it. Lowercasing is inside the comparator only, never applied to a returned value.
+fn fold(s: &str) -> alloc::string::String {
+    let mut out = alloc::string::String::new();
+    for w in s.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        for c in w.chars().flat_map(char::to_lowercase) {
+            out.push(c);
         }
     }
     out
