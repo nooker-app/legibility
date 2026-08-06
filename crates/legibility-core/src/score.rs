@@ -482,23 +482,28 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
     if let Some(anchor) = innermost_anchor(arena, &cands) {
         if anchor == best.node {
             from_anchor = true;
-        } else {
-            let anchor_prose = arena.prose_len.get(anchor.idx()).copied().unwrap_or(0);
-            let best_prose = arena.prose_len.get(best.node.idx()).copied().unwrap_or(0);
-            // Lower bound only. An upper bound looked obviously necessary -- four pages regressed
-            // from ~1.0 to ~0.63 and each had an anchor several times larger than the statistical
-            // pick -- but sweeping it over the corpus showed it buys nothing: those four regress
-            // identically with the anchor rung switched off, so the anchor was not their cause,
-            // and capping the ratio only gave up the pages the rung repairs (heise 0.446 -> 0.865,
-            // spiceworks 0.816 -> 1.000). The measurement is in tests/anchor_band.rs.
-            if guarded_div(anchor_prose as f32, best_prose as f32) >= ANCHOR_MIN_PROSE_SHARE {
-                if let Some(c) = cands.iter().find(|c| c.node == anchor) {
-                    chosen = c;
-                    from_anchor = true;
-                }
+        } else if let Some(c) = cands.iter().find(|c| c.node == anchor) {
+            // Compared on `text_share`, which is prose *after* comment masking -- the same quantity
+            // the scorer ranked on. Comparing raw `prose_len` instead read a discussion page
+            // backwards: `<main>` holds the post plus the whole thread, so a submission body next
+            // to eighteen replies scored 0.03 against it and the anchor was refused, leaving the
+            // thread in the body. Two signals can only be cross-validated against each other if
+            // they are measuring the same thing.
+            //
+            // Lower bound only. An upper bound looked obviously necessary -- four corpus pages
+            // regressed from ~1.0 to ~0.63, each with an anchor several times larger than the
+            // statistical pick -- but sweeping it showed it buys nothing: those four regress
+            // identically with this rung switched off, so the anchor was not their cause, and
+            // capping only gave up the pages the rung repairs (heise 0.446 -> 0.865, spiceworks
+            // 0.816 -> 1.000). The measurement is in legibility-cli/tests/anchor_band.rs.
+            if guarded_div(c.text_share, best.text_share) >= ANCHOR_MIN_PROSE_SHARE {
+                chosen = c;
+                from_anchor = true;
             } else {
                 conflict = true;
             }
+        } else {
+            conflict = true;
         }
     }
 

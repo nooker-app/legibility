@@ -130,6 +130,7 @@ fn f1(a: &str, b: &str) -> f32 {
     2.0 * p * r / (p + r)
 }
 
+#[allow(dead_code)]
 fn region_text(arena: &Arena, node: NodeId) -> String {
     let end = arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize;
     let mut out = String::new();
@@ -150,7 +151,12 @@ fn region_text(arena: &Arena, node: NodeId) -> String {
     out
 }
 
-/// `(name, f1)` for every corpus page, through the real selector.
+/// `(name, f1)` for every corpus page, through the **whole pipeline**.
+///
+/// `extract_all`, not `select_article`: comment masking, the anchor rung and the article exclusions
+/// all sit between the two, and this measured none of them until a masking bug that changed 130
+/// pages' output slipped past it untouched. A gate that watches half the pipeline reports on the
+/// half that is not moving.
 fn measure() -> Vec<(String, f32)> {
     corpus()
         .into_iter()
@@ -159,9 +165,10 @@ fn measure() -> Vec<(String, f32)> {
             let exp = std::fs::read(d.join("expected.html")).ok()?;
             let html = String::from_utf8_lossy(&src).into_owned();
             let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
-            let ours = legibility_core::select_article(&arena)
-                .article
-                .map_or(String::new(), |n| region_text(&arena, n));
+            let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+            let ours = out.selection.article.map_or(String::new(), |n| {
+                legibility_dom::json::prose_text_excluding(&arena, n, &out.article_exclusions)
+            });
             let want = text_of(&String::from_utf8_lossy(&exp));
             Some((d.file_name()?.to_string_lossy().into_owned(), f1(&ours, &want)))
         })
@@ -233,7 +240,7 @@ fn bless_baseline() {
         return;
     }
     let mut out = String::from(
-        "# Per-page token-F1 against mozilla expected.html, from legibility_core::select_article.\n\
+        "# Per-page token-F1 against mozilla expected.html, through legibility_core::extract_all.\n\
          # A ratchet: see no_page_falls_below_its_committed_baseline. Regenerate deliberately.\n",
     );
     let mut rows = rows;

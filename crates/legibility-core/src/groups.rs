@@ -523,7 +523,19 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group]) -> Vec<u32> {
         }
     }
 
-    let mut own = alloc::vec![0u32; arena.len()];
+    // `masked[i] == prose_len[i]` for every node *inside* a comment, so `prose - masked` is zero
+    // there. An earlier version marked only the matched container and rolled the value up to its
+    // ancestors, leaving every node *within* the comment untouched -- so each comment's inner
+    // `<div class="markdown-body">` stayed a full-strength candidate, and on a GeekNews thread one
+    // of them beat the twenty-one-character submission body. Masking a container has to mean its
+    // contents are out of the running, or it means nothing.
+    let mut masked = alloc::vec![0u32; arena.len()];
+    // Strictly inside a masked comment, as opposed to being the comment's own root. The two need
+    // different treatment in the roll-up: the root contributes to its ancestors, the interior must
+    // not contribute again to a parent that is itself already fully masked.
+    let mut inside = alloc::vec![false; arena.len()];
+    let mut is_root = alloc::vec![false; arena.len()];
+
     // Document order means a nested match always appears after the outer one it sits inside, so a
     // single high-water mark suffices to skip it -- the outer match's prose already covers it.
     // Scanning backwards for an enclosing match instead would be quadratic on a deep thread.
@@ -543,26 +555,33 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group]) -> Vec<u32> {
         if !identities.contains(&id) {
             continue;
         }
-        if let Some(slot) = own.get_mut(i) {
-            *slot = arena.prose_len.get(i).copied().unwrap_or(0);
+        let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        if let Some(slot) = is_root.get_mut(i) {
+            *slot = true;
         }
-        covered_until = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        // The whole subtree, root included. Non-overlapping by construction (covered_until), so the
+        // total work across all comments is one pass over the nodes they occupy.
+        for j in i..end.max(i + 1) {
+            if let Some(slot) = masked.get_mut(j) {
+                *slot = arena.prose_len.get(j).copied().unwrap_or(0);
+            }
+            if let Some(slot) = inside.get_mut(j) {
+                *slot = true;
+            }
+        }
+        covered_until = end;
     }
 
-    // Roll up. A masked member's own value is already its whole subtree, so descendants of a masked
-    // member must not add again -- hence the skip.
-    let mut out = own.clone();
+    // Roll up to ancestors above the comments. Interior nodes are skipped: their parent is inside
+    // the same comment and already carries the full total, so adding again would double-count and
+    // could push a container's masked prose above its actual prose.
+    let mut out = masked.clone();
     for i in (0..arena.len()).rev() {
-        let Some(&parent) = arena.parent.get(i) else { continue };
-        if !parent.is_some() {
+        if inside.get(i).copied().unwrap_or(false) && !is_root.get(i).copied().unwrap_or(false) {
             continue;
         }
-        if own.get(i).copied().unwrap_or(0) > 0 {
-            // This node is a masked member: contribute its own total, not its children's.
-            let v = own.get(i).copied().unwrap_or(0);
-            if let Some(slot) = out.get_mut(parent.idx()) {
-                *slot = slot.saturating_add(v);
-            }
+        let Some(&parent) = arena.parent.get(i) else { continue };
+        if !parent.is_some() {
             continue;
         }
         let v = out.get(i).copied().unwrap_or(0);

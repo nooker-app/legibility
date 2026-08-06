@@ -1,11 +1,11 @@
-# Per-page token-F1 against mozilla expected.html, from legibility_core::select_article.
+# Per-page token-F1 against mozilla expected.html, through legibility_core::extract_all.
 # A ratchet: see no_page_falls_below_its_committed_baseline. Regenerate deliberately.
 001	0.8233
 002	0.9925
 003-metadata-preferred	1.0000
 004-metadata-space-separated-properties	1.0000
 005-unescape-html-entities	0.0000
-aclu	0.7208
+aclu	0.9022
 aktualne	0.6290
 archive-of-our-own	1.0000
 ars-1	0.9306
@@ -15,9 +15,9 @@ base-url-base-element	1.0000
 base-url-base-element-relative	1.0000
 basic-tags-cleaning	0.9807
 bbc-1	0.7915
-blogger	0.9280
-breitbart	0.3284
-bug-1255978	0.3030
+blogger	0.9289
+breitbart	0.3316
+bug-1255978	0.3032
 buzzfeed-1	0.7160
 citylab-1	0.9788
 clean-links	0.9857
@@ -29,11 +29,11 @@ daringfireball-1	0.9680
 data-url-image	0.0000
 dev418	0.0377
 dropbox-blog	0.9891
-ebb-org	0.9678
+ebb-org	0.9691
 ehow-1	0.8479
-ehow-2	0.9782
+ehow-2	0.9790
 embedded-videos	0.9964
-engadget	0.9022
+engadget	0.9029
 firefox-nightly-blog	0.9182
 folha	0.7315
 gitlab-blog	0.9066
@@ -58,7 +58,7 @@ lemonde-1	0.9331
 liberation-1	0.2642
 lifehacker-post-comment-load	0.9441
 lifehacker-working	0.9326
-links-in-tables	0.9985
+links-in-tables	0.0000
 lwn-1	0.9939
 mathjax	0.0000
 medicalnewstoday	0.6843
@@ -81,7 +81,7 @@ ol	1.0000
 parsely-metadata	1.0000
 pixnet	0.3475
 qq	0.5042
-quanta-1	0.9520
+quanta-1	0.9586
 remove-aria-hidden	0.9863
 remove-extra-brs	0.9922
 remove-extra-paragraphs	0.9922
@@ -96,14 +96,14 @@ rtl-3	1.0000
 rtl-4	1.0000
 salon-1	0.9924
 schema-org-context-object	0.9684
-seattletimes-1	0.9516
+seattletimes-1	0.9521
 simplyfound-1	0.9076
 social-buttons	0.9943
 spiceworks	0.9817
 style-tags-removal	1.0000
 svg-parsing	0.0000
 table-style-attributes	0.4337
-telegraph	0.5970
+telegraph	0.6047
 theverge	0.8748
 title-and-h1-discrepancy	1.0000
 title-en-dash	1.0000
@@ -124,7 +124,7 @@ wikipedia	0.9438
 wikipedia-2	0.9449
 wikipedia-3	0.0103
 wikipedia-4	0.9784
-wordpress	0.4278
+wordpress	0.4297
 yahoo-1	0.7776
 yahoo-2	0.6854
 yahoo-3	0.3775

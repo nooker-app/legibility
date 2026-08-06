@@ -196,8 +196,12 @@ impl BuildArena {
         // doc_buf moves over wholesale: it was accumulated during parsing and every text/attr
         // range already indexes into it. Copying it again would be the single largest
         // avoidable allocation in the pipeline.
-        let mut arena =
-            Arena { doc_buf: build.doc_buf, attrs: build.attrs, ..Arena::default() };
+        let mut arena = Arena {
+            doc_buf: build.doc_buf,
+            attrs: build.attrs,
+            dynamic_tags: build.dynamic_tags,
+            ..Arena::default()
+        };
 
         // (build index, inherited role, exit-marker for already-emitted node)
         enum Step {

@@ -13,7 +13,7 @@ use legibility_core::meta::{Candidate, DateValue, Metadata};
 use legibility_core::{Arena, LimitsHit, NodeId, NodeKind, Outcome, TagId};
 use legibility_sanitize::Article;
 
-use crate::serialize::{serialize_region, SerializeOptions};
+use crate::serialize::{serialize_region_excluding, SerializeOptions};
 
 /// Serialize a complete extraction.
 ///
@@ -34,18 +34,44 @@ pub fn extraction_json(
     s.push_str(",\"article\":");
     match out.selection.article {
         Some(n) => {
-            let (html, rep) = serialize_region::<Article>(arena, n, SerializeOptions::default());
+            // Comments and the section furniture around them, decided in the pipeline: the
+            // serializer is told what to skip rather than deciding for itself.
+            let comment_nodes: &[NodeId] = &out.article_exclusions;
+            let (html, rep) = serialize_region_excluding::<Article>(
+                arena,
+                n,
+                SerializeOptions::default(),
+                comment_nodes,
+            );
             s.push_str("{\"html\":");
             push_str(&mut s, html.as_str());
             s.push_str(",\"text\":");
-            push_str(&mut s, &prose_text(arena, n));
+            push_str(&mut s, &prose_text_excluding(arena, n, comment_nodes));
             s.push_str(",\"tag\":");
             push_str(
                 &mut s,
                 arena.tag.get(n.idx()).copied().and_then(TagId::known_name).unwrap_or("?"),
             );
             s.push_str(",\"prose_len\":");
-            s.push_str(&arena.prose_len.get(n.idx()).copied().unwrap_or(0).to_string());
+            // Net of the exclusions, so `prose_len`, `text` and `html` describe the same thing. The
+            // raw subtree total would say 441 bytes next to a 280-byte `text` and leave a caller to
+            // guess which is wrong.
+            // Only the exclusions actually inside the region. `article_exclusions` lists every
+            // comment on the page, and most pages put the thread *outside* the chosen region --
+            // subtracting those reported a 432-byte submission as 0 bytes.
+            let region_end = arena.subtree_end.get(n.idx()).copied().unwrap_or(0) as usize;
+            let excluded: u32 = comment_nodes
+                .iter()
+                .filter(|c| c.idx() > n.idx() && c.idx() < region_end)
+                .map(|c| arena.prose_len.get(c.idx()).copied().unwrap_or(0))
+                .sum();
+            let net = arena
+                .prose_len
+                .get(n.idx())
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(excluded);
+            s.push_str(&net.to_string());
             s.push_str(",\"confidence\":");
             s.push_str(&out.selection.confidence.to_string());
             s.push_str(",\"dropped_subtrees\":");
@@ -295,26 +321,41 @@ fn date_json(arena: &Arena, c: &Candidate, d: &DateValue) -> String {
 /// Prose-only text of a region, whitespace collapsed.
 #[must_use]
 pub fn prose_text(arena: &Arena, region: NodeId) -> String {
+    prose_text_excluding(arena, region, &[])
+}
+
+/// [`prose_text`] with subtrees left out.
+///
+/// Must take the same exclusions as the HTML. `article.html` without the comments and
+/// `article.text` with them is worse than either on its own: anything measuring the text -- an F1
+/// score, a reading-time estimate, a search index -- would then disagree with what a reader sees.
+#[must_use]
+pub fn prose_text_excluding(arena: &Arena, region: NodeId, exclude: &[NodeId]) -> String {
     let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
     let mut out = String::new();
-    for i in region.idx()..end {
-        if arena.kind.get(i).copied() != Some(NodeKind::Text) {
-            continue;
-        }
-        if !arena
-            .text_role
-            .get(i)
-            .copied()
-            .is_some_and(legibility_core::a11y::TextRole::is_prose)
-        {
-            continue;
-        }
-        for w in arena.own_text(NodeId(i as u32)).split_whitespace() {
-            if !out.is_empty() {
-                out.push(' ');
+    let mut i = region.idx();
+    while i < end {
+        if i != region.idx() {
+            if let Some(skip) = exclude.iter().find(|n| n.idx() == i) {
+                i = arena.subtree_end.get(skip.idx()).copied().unwrap_or(0) as usize;
+                continue;
             }
-            out.push_str(w);
         }
+        if arena.kind.get(i).copied() == Some(NodeKind::Text)
+            && arena
+                .text_role
+                .get(i)
+                .copied()
+                .is_some_and(legibility_core::a11y::TextRole::is_prose)
+        {
+            for w in arena.own_text(NodeId(i as u32)).split_whitespace() {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(w);
+            }
+        }
+        i += 1;
     }
     out
 }

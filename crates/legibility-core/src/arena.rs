@@ -241,6 +241,14 @@ pub struct Arena {
     /// Note the honest scope: this proves *we* did not mangle the value. It is not
     /// byte-fidelity against the original network bytes, which v1 does not offer.
     pub doc_buf: alloc::string::String,
+
+    /// Names of custom and unknown elements, indexed by `TagId - TagId::FIRST_DYNAMIC`.
+    ///
+    /// Kept because pages are now largely custom elements — Reddit's post, comment tree and
+    /// composer are all `<shreddit-*>` — and a name is often the only thing that says what one is.
+    /// Dropping them at flatten left core able to see *that* an element was unknown but not
+    /// *which*, which is the difference between "some element" and "the comment tree".
+    pub dynamic_tags: alloc::vec::Vec<alloc::string::String>,
 }
 
 impl Arena {
@@ -301,6 +309,17 @@ impl Arena {
     #[must_use]
     pub fn span_text(&self, start: u32, end: u32) -> &str {
         self.doc_buf.get(start as usize..end as usize).unwrap_or("")
+    }
+
+    /// Element name, whether standard or custom. `None` for non-elements.
+    #[must_use]
+    pub fn tag_name(&self, n: NodeId) -> Option<&str> {
+        let tag = self.tag.get(n.idx()).copied()?;
+        if let Some(known) = tag.known_name() {
+            return Some(known);
+        }
+        let idx = tag.0.checked_sub(crate::TagId::FIRST_DYNAMIC)? as usize;
+        self.dynamic_tags.get(idx).map(alloc::string::String::as_str)
     }
 
     /// This node's own text, or `""` if it has none or the id is unknown.

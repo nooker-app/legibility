@@ -64,6 +64,24 @@ pub fn serialize_region<P: Profile>(
     region: NodeId,
     opts: SerializeOptions,
 ) -> (SanitizedHtml<P>, SerializeReport) {
+    serialize_region_excluding(arena, region, opts, &[])
+}
+
+/// [`serialize_region`] with subtrees that must not appear in the output.
+///
+/// The article region can *contain* the comment thread — Reddit's `<main>` holds the post, the
+/// composer and the whole discussion — and scoring alone cannot prevent that: masking keeps comment
+/// prose out of the *statistics*, but the region that wins is still an ancestor of the thread, and
+/// walking it emits every comment. Comments in `article.html` is the failure the plan makes a
+/// hard-fail gate, so the region walk is told which subtrees to skip rather than left to rediscover
+/// them from class names.
+#[must_use]
+pub fn serialize_region_excluding<P: Profile>(
+    arena: &Arena,
+    region: NodeId,
+    opts: SerializeOptions,
+    exclude: &[NodeId],
+) -> (SanitizedHtml<P>, SerializeReport) {
     let mut out = String::new();
     let mut report = SerializeReport::default();
     let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
@@ -115,6 +133,13 @@ pub fn serialize_region<P: Profile>(
                         let tag = arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN);
                         let name = tag.known_name().unwrap_or("");
 
+                        // Excluded subtrees (comments, when the region encloses them) go first:
+                        // they are a caller's decision about content, not a property of the node,
+                        // so no later rule can be relied on to catch them.
+                        if i != start && exclude.iter().any(|n| n.idx() == i) {
+                            report.dropped_subtrees = report.dropped_subtrees.saturating_add(1);
+                            continue;
+                        }
                         // Hidden and inert subtrees never reach output at all. Inert is the
                         // stronger case of the two: a `<script>` body must not be emitted even
                         // as escaped text, and the sanitizer's raw-text rule depends on it.

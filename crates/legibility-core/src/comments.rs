@@ -182,6 +182,12 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
     let mut author = None;
     let mut timestamp = None;
     let mut permalink = None;
+    // The nodes the author and timestamp were read *from*, so their text can be left out of the
+    // body. They are already returned as their own fields, and repeating them as a prefix on every
+    // item ("hshim 2026-07-24 08:59:37 \u{c800}\u{b294}...") makes the text unusable for anything that
+    // measures or displays it.
+    let mut author_node: Option<NodeId> = None;
+    let mut time_node: Option<NodeId> = None;
 
     for i in m.idx()..end {
         let id = NodeId(i as u32);
@@ -195,16 +201,23 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
                 let t = subtree_prose(arena, id);
                 if !t.is_empty() {
                     author = Some(t);
+                    author_node = Some(id);
                 }
             }
         }
         if timestamp.is_none() {
             if let Some(dt) = arena.attr(id, AttrName::DATETIME) {
                 timestamp = Some(dt.to_string());
+                // A `datetime` attribute is usually on the <time> whose text is the human-readable
+                // copy of the same instant, so that text is a duplicate too.
+                if arena.tag.get(i).copied() == Some(TagId::TIME) {
+                    time_node = Some(id);
+                }
             } else if arena.tag.get(i).copied() == Some(TagId::TIME) {
                 let t = subtree_prose(arena, id);
                 if !t.is_empty() {
                     timestamp = Some(t);
+                    time_node = Some(id);
                 }
             }
         }
@@ -217,7 +230,7 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         }
     }
 
-    let text = subtree_prose(arena, m);
+    let text = subtree_prose_excluding(arena, m, &[author_node, time_node]);
     let lower_owned = text.to_lowercase();
     let lower = lower_owned.as_str();
     let flags = Flags {
@@ -261,6 +274,47 @@ fn subtree_prose(arena: &Arena, node: NodeId) -> String {
             }
             out.push_str(w);
         }
+    }
+    out
+}
+
+/// [`subtree_prose`] with the given subtrees left out.
+///
+/// Used to keep the author name and timestamp out of a comment's body text. They are returned as
+/// their own fields, so including them again meant every item read
+/// `"hshim 2026-07-24 08:59:37 저는 …"` — duplication that also skews any length or similarity
+/// measure taken on the text, and the quote-duplicate detection planned for M9 is exactly such a
+/// measure.
+///
+/// Only the nodes the values were actually read from are excluded, not a whole metadata container:
+/// which element wraps the byline is a per-site question, whereas "the `<a>` I took the author from"
+/// is not.
+fn subtree_prose_excluding(arena: &Arena, node: NodeId, skip: &[Option<NodeId>]) -> String {
+    let end = arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize;
+    let mut out = String::new();
+    let mut i = node.idx();
+    while i < end {
+        // Jump the whole excluded subtree rather than filtering node by node, so nested markup
+        // inside a byline (`<a><span>name</span></a>`) cannot leak a fragment through.
+        if let Some(s) = skip
+            .iter()
+            .flatten()
+            .find(|s| s.idx() == i)
+        {
+            i = arena.subtree_end.get(s.idx()).copied().unwrap_or(0) as usize;
+            continue;
+        }
+        if arena.kind.get(i).copied() == Some(NodeKind::Text)
+            && arena.text_role.get(i).copied().is_some_and(crate::a11y::TextRole::is_prose)
+        {
+            for w in arena.own_text(NodeId(i as u32)).split_whitespace() {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(w);
+            }
+        }
+        i += 1;
     }
     out
 }

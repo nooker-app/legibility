@@ -41,6 +41,12 @@ pub struct Outcome {
     pub group_count: u32,
     /// Share of page prose held by the detected comment thread.
     pub comment_prose_share: f32,
+    /// Subtrees inside the article region that must not be serialized as body: every detected
+    /// comment, plus the comment-section furniture around them.
+    ///
+    /// Computed here rather than in the serializer because it is a judgement about content, and the
+    /// serializer should only ever be told what to skip. See [`comment_section_nodes`].
+    pub article_exclusions: Vec<crate::NodeId>,
 }
 
 /// Run the full pipeline.
@@ -100,6 +106,15 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         };
     }
 
+    let article_exclusions = match selection.article {
+        Some(region) => {
+            let mut v: Vec<crate::NodeId> = comments.items.iter().map(|c| c.node).collect();
+            v.extend(comment_section_nodes(arena, region, &v));
+            v
+        }
+        None => Vec::new(),
+    };
+
     Outcome {
         selection,
         comment_prose_share: thread
@@ -109,7 +124,96 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         is_listing: listing,
         comment_mask_reverted: reverted,
         group_count: u32::try_from(groups.len()).unwrap_or(u32::MAX),
+        article_exclusions,
     }
+}
+
+/// Comment-section containers inside `region` that hold no detected comment.
+///
+/// Masking removes comments from the statistics and [`Outcome::article_exclusions`] removes them
+/// from the output, but neither helps when the section is *empty*: a Reddit post with no replies
+/// still carries "Be the first to comment", the composer and the sort controls inside the `<main>`
+/// that wins, and all of it reads as body text. There is nothing to mask because there is nothing
+/// there.
+///
+/// Two matchers, deliberately of different strictness:
+///
+/// - **Element name** containing `comment`. Custom elements are named by the site for what they
+///   are — `<shreddit-comment-tree>`, `<comment-body-header>` — and a made-up tag name with
+///   "comment" in it is not plausibly article prose.
+/// - **`class`/`id`** matching a *section-like* token only (`comments`, `comment-list`,
+///   `comment-tree`, `disqus_thread`, `respond`, `댓글`…). A bare `comment` token is too weak:
+///   `class="comment-policy"` on an article *about* moderation would take the article with it.
+///
+/// Guarded by an invariant rather than a threshold: **removal must leave some prose behind**. That
+/// is what separates the two cases exactly. On a post with an empty comment section the tree is a
+/// sibling of the body, so removing it leaves the body — even when the empty state is longer than
+/// the post, which it often is. On an article *about* moderation, `<div class="comments">` holds
+/// everything, so removing it leaves nothing and the match is refused.
+///
+/// A share threshold was tried first and got this backwards: at "no more than half the region" the
+/// genuine case failed whenever the boilerplate outweighed a short post, which is the case that
+/// motivated the rule.
+#[must_use]
+pub fn comment_section_nodes(
+    arena: &Arena,
+    region: crate::NodeId,
+    already: &[crate::NodeId],
+) -> Vec<crate::NodeId> {
+    /// Section-like `class`/`id` tokens. Plural or structural forms only; see above.
+    const SECTION_TOKENS: [&str; 11] = [
+        "comments",
+        "comment-list",
+        "commentlist",
+        "comment-tree",
+        "comment-section",
+        "comment-thread",
+        "commentthread",
+        "disqus_thread",
+        "disqus-thread",
+        "respond",
+        "댓글",
+    ];
+
+    let region_prose = arena.prose_len.get(region.idx()).copied().unwrap_or(0);
+    let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
+
+    let mut found: Vec<crate::NodeId> = Vec::new();
+    let mut covered_until = 0usize;
+    for i in (region.idx() + 1)..end {
+        if arena.kind.get(i).copied() != Some(crate::NodeKind::Element) {
+            continue;
+        }
+        // Outermost match wins; anything inside it goes with it anyway.
+        if i < covered_until {
+            continue;
+        }
+        let node = crate::NodeId(i as u32);
+        if already.iter().any(|n| n.idx() == i) {
+            continue;
+        }
+        let by_name = arena.tag_name(node).is_some_and(|n| n.contains("comment"));
+        let by_attr = [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
+            .iter()
+            .filter_map(|&a| arena.attr(node, a))
+            .any(|v| {
+                v.split(|c: char| c.is_whitespace())
+                    .any(|t| SECTION_TOKENS.iter().any(|s| t.eq_ignore_ascii_case(s)))
+            });
+        if by_name || by_attr {
+            found.push(node);
+            covered_until = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        }
+    }
+
+    let removed: u32 = found
+        .iter()
+        .map(|n| arena.prose_len.get(n.idx()).copied().unwrap_or(0))
+        .sum();
+    if removed >= region_prose {
+        return Vec::new();
+    }
+    found
 }
 
 /// Whether a non-comment repeated group holds most of the page's prose.
