@@ -160,7 +160,6 @@ pub fn decide(
     // Direct children of whatever the search is scoped to. `start` is the container node itself
     // in the narrowed case, so its children begin one past it.
     let children_start = container.map_or(region.idx() + 1, |c| c.idx() + 1);
-    let byline = submission_byline(arena, children_start, end, title, title_prose);
 
     let mut body: Option<NodeId> = None;
     let mut body_prose = 0u32;
@@ -206,6 +205,17 @@ pub fn decide(
         i += 1;
     }
 
+    // A body has to have *passed* to count as one. Reporting the widest candidate regardless was
+    // wrong in a way that stayed hidden while `body` was only ever reported: on a page whose title
+    // sits in its own `<header>`, the widest candidate inside that header is the meta line, and the
+    // `WithBody` verdict is reached through `link.is_none()` rather than through the mass test. The
+    // field then named the byline as the body. Harmless until the byline rule started excluding
+    // whatever `body` names, at which point it hid the very node it was looking for.
+    let qualified = (body_prose > title_prose).then_some(body).flatten();
+
+    // Computed after the body is known, because the body is the one thing the byline must never be.
+    let byline = submission_byline(arena, children_start, end, title_prose, qualified, exclusions);
+
     // A body says more than its own headline. Everything that fails this is furniture: the
     // credit bar, the score, a timestamp line, a caption -- and on a link submission, the
     // pasted URL with its brackets.
@@ -214,11 +224,11 @@ pub fn decide(
     // heading sits alone in a header block reports a pointer with no destination, and the
     // serializer's answer to a pointer is an empty body -- so a misjudgement here does not
     // degrade the article, it deletes it. A pointer that points nowhere is not a pointer.
-    if body_prose > title_prose || link.is_none() {
+    if qualified.is_some() || link.is_none() {
         Some(Shape {
             kind: DiscussionShape::WithBody,
             title,
-            body,
+            body: qualified,
             link,
             byline,
         })
@@ -240,36 +250,51 @@ pub fn decide(
 /// inside the same container. It is not prose; every one of its fields is already returned as a
 /// metadata candidate with provenance.
 ///
+/// # Which side of the headline
+///
+/// Either. Two sites, same construct, opposite order:
+///
+/// ```text
+///   reddit    <div>r/rss · <time>12d ago</time> · author</div>   <h1>…</h1>   <div>body</div>
+///   beebs     <div class=title-line><h1>…</h1></div>   <div>author · views · <time>…</time></div>
+/// ```
+///
+/// The first version looked only before the headline and left the whole meta line on every beebs
+/// thread. Position is not the signal; the `<time>` is.
+///
 /// # Why this is allowed to remove text when narrowing to `body` was not
 ///
 /// The reverted approach (see [`decide`]) *chose a new region* by comparing prose mass, so it
 /// could and did pick an ad rail or a comment list over the article. This removes a **single
-/// direct child** identified by a structural fact instead of a size comparison: it precedes the
-/// headline and it contains a `<time>`. Nothing that is article prose satisfies that — a dateline
-/// before the headline is the only construct on the web that does.
+/// direct child** identified by a structural fact instead of a size comparison: it carries a
+/// `<time>`. Article prose does not.
 ///
-/// Three guards keep it from ever reaching an article's text. It runs only when
-/// `is_discussion`, so the 130-page corpus cannot enter it at all. It refuses any child holding
-/// a heading of its own, so a nested submission or a section title is never swallowed. And it
-/// refuses a child that out-masses the headline, reusing the same comparison the shape rule
-/// already trusts — if something bigger than the title precedes the title, this module has
-/// misread the page and the safe move is to keep the text.
+/// Four guards keep it away from an article's text:
+///
+/// - it runs only when `is_discussion`, so the 130-page corpus cannot enter it at all;
+/// - the qualified `body` is excluded, along with anything containing it — the block that beat the
+///   headline is not the dateline, and that is what makes searching *after* the headline safe;
+/// - anything holding a comment is excluded, so a reply — which also carries a `<time>` and no
+///   heading — can never be mistaken for the dateline;
+/// - a child holding a heading of its own is refused, which also skips the headline's own wrapper;
+/// - a child out-massing the headline is refused, reusing the comparison the shape rule already
+///   trusts. Something bigger than the title means this module has misread the page, and keeping
+///   the text is the safe move.
 fn submission_byline(
     arena: &Arena,
     children_start: usize,
     end: usize,
-    title: NodeId,
     title_prose: u32,
+    body: Option<NodeId>,
+    exclusions: &[NodeId],
 ) -> Option<NodeId> {
     let mut c = children_start;
-    while c < end && c < title.idx() {
+    while c < end {
         let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
-        // Only children that end before the title starts. A child spanning the title is a
-        // wrapper, and removing a wrapper would take the submission with it.
-        if child_end > title.idx() {
-            break;
-        }
+        let holds = |n: NodeId| n.idx() >= c && n.idx() < child_end;
         if arena.kind.get(c).copied() == Some(NodeKind::Element)
+            && !body.is_some_and(holds)
+            && !exclusions.iter().copied().any(holds)
             && arena.prose_len.get(c).copied().unwrap_or(0) <= title_prose
             && subtree_has(arena, c, child_end, TagId::TIME)
             && !subtree_has_heading(arena, c, child_end)

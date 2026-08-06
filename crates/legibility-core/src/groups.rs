@@ -27,11 +27,23 @@ use crate::arena::{Arena, AttrName, NodeId, NodeKind};
 use crate::num::guarded_div;
 use crate::tag::TagId;
 
-/// Minimum members before repetition is evidence of a template rather than coincidence.
+/// Minimum members before repetition *by itself* is evidence of a template.
 ///
-/// Two siblings that happen to look alike are common; three is a pattern. This is the one count
-/// threshold in the module, and it is a count of *structures*, not of characters.
+/// Two siblings that happen to look alike are common; three is a pattern. A count of *structures*,
+/// not of characters. See [`Group::is_comment_thread`] for the one case that clears it with two,
+/// which does so by adding evidence rather than by lowering this.
 const MIN_GROUP: usize = 3;
+
+/// Minimum siblings for an [`identity_group`] — and only for one.
+///
+/// Applying it to the structural pass as well was tried and reverted. Buckets of two that used to be
+/// dropped then reached [`merge_by_signature`], which unions by identity, and on the corpus page
+/// `mozilla-2` a five-member listing plus stray pairs merged into eight members holding 59% of the
+/// page — over the dominance share, so the article was withheld and its F1 went 0.991 → **0.000**.
+///
+/// Confining the relaxation to the identity fallback leaves every structural group bit-identical to
+/// before, which is what makes this change safe to reason about.
+const MIN_SIBLINGS: usize = 2;
 
 /// How many descendants contribute to a signature.
 ///
@@ -81,6 +93,13 @@ pub struct Group {
     /// text*, while a comment's author link is a few characters against a paragraph. One number,
     /// and the two shapes fall apart.
     pub mean_max_link_share: f32,
+    /// Whether the members were gathered by their shared `(tag, class)` rather than by a shared
+    /// structural signature — see [`identity_group`].
+    ///
+    /// Weaker evidence, and the strength of the evidence has to match the cost of being wrong.
+    /// Calling a thread of two a thread costs a byline being masked; calling a page an index costs
+    /// the whole article, so [`Group::is_listing`] declines to rest on it.
+    pub by_identity: bool,
 }
 
 impl Group {
@@ -90,9 +109,33 @@ impl Group {
     /// product grid or nav menu does not. Two negative discriminators guard against the remaining
     /// confusions — a link-dense group is a menu, and a group whose every member carries a heading
     /// is an article listing.
+    ///
+    /// # Threads of two
+    ///
+    /// `stated_total` is [`crate::comments::claimed_total`]: the number the page prints about
+    /// itself. A pair of look-alike siblings is admitted when that number is *exactly* the pair,
+    /// and this is the only way past [`MIN_GROUP`].
+    ///
+    /// Two beebs.hada.io threads on the same template, found by reading them:
+    ///
+    /// | thread | comments | before |
+    /// |---|---|---|
+    /// | `t/60` | 18 | correct |
+    /// | `t/61` | 2 | **the first comment was returned as the article** |
+    ///
+    /// With two members the whole detection collapsed: no group formed, so nothing was masked, so
+    /// the widest prose block on the page won — and on a discussion page that is a comment. Defect
+    /// ③ arriving through the front door on a page that simply had few replies.
+    ///
+    /// Lowering [`MIN_GROUP`] to two would be the wrong repair: its rationale is sound, and pairs of
+    /// look-alike siblings are everywhere. The page supplies a *different* kind of evidence instead
+    /// — `댓글 2` — and repetition is no longer the only thing being trusted. Requiring an exact
+    /// match rather than a floor is what makes it evidence: a nav badge reading `5 comments` next to
+    /// two related-post cards does not corroborate them, and every other gate below still applies.
     #[must_use]
-    pub fn is_comment_thread(&self) -> bool {
-        if self.members.len() < MIN_GROUP {
+    pub fn is_comment_thread(&self, stated_total: Option<u32>) -> bool {
+        let corroborated = stated_total.is_some_and(|n| n as usize == self.members.len());
+        if self.members.len() < MIN_GROUP && !corroborated {
             return false;
         }
         if self.micro_metadata_ratio < 0.7 {
@@ -113,9 +156,19 @@ impl Group {
     /// Whether this group is a listing (index page, product grid, nav).
     ///
     /// The mirror of [`Group::is_comment_thread`]: repetition without per-item authorship.
+    ///
+    /// Keeps the full [`MIN_GROUP`] with no corroboration escape, and declines
+    /// [`Group::by_identity`] groups outright. A pair is not an index page, and the consequence of
+    /// believing one is `NoArticle{IndexPage}` — the whole article withheld.
+    ///
+    /// The second half was learned the expensive way. Admitting identity-grouped members here turned
+    /// eight structurally-unlike `<li>` on the corpus page `mozilla-2` into a listing holding 59% of
+    /// the page, and its article went from F1 0.991 to **0.000** — withheld entirely. A shared class
+    /// is the site labelling items; a shared signature is evidence they are one template. Only the
+    /// second is strong enough to justify returning nothing.
     #[must_use]
     pub fn is_listing(&self) -> bool {
-        if self.members.len() < MIN_GROUP {
+        if self.by_identity || self.members.len() < MIN_GROUP {
             return false;
         }
         // A listing whose items carry authors and timestamps is still a listing if its text lives
@@ -305,7 +358,12 @@ pub fn merge_by_signature(arena: &Arena, groups: &[Group]) -> Vec<Group> {
     for g in groups {
         let k = key(g);
         match out.iter_mut().find(|o| key(o) == k) {
-            Some(existing) => existing.members.extend_from_slice(&g.members),
+            Some(existing) => {
+                existing.members.extend_from_slice(&g.members);
+                // Weakest evidence wins: a union holding identity-gathered members rests on
+                // identity for those members however the others were found.
+                existing.by_identity |= g.by_identity;
+            }
             None => out.push(g.clone()),
         }
     }
@@ -313,7 +371,12 @@ pub fn merge_by_signature(arena: &Arena, groups: &[Group]) -> Vec<Group> {
         g.members.sort_unstable();
         g.members.dedup();
         let merged = describe(arena, g.parent, g.signature, core::mem::take(&mut g.members));
-        *g = merged;
+        // `describe` rebuilds every field, so `by_identity` has to be carried across by hand.
+        // Letting it reset was a two-page corpus regression: an identity group left this function
+        // indistinguishable from a structural one, reached [`Group::is_listing`] -- which exists to
+        // refuse exactly that evidence -- and `mozilla-2` and `mercurial` both went to **F1 0.000**,
+        // their articles withheld as index pages.
+        *g = Group { by_identity: g.by_identity, ..merged };
     }
     out
 }
@@ -323,6 +386,10 @@ pub fn merge_by_signature(arena: &Arena, groups: &[Group]) -> Vec<Group> {
 /// One pass: for each element, bucket its element children by signature, then keep buckets with at
 /// least [`MIN_GROUP`] members. Children are compared only against their own siblings, which is
 /// what makes this O(n) with a small constant rather than a pairwise comparison.
+///
+/// Forming pairs is not the same as believing them. Classification is
+/// [`Group::is_comment_thread`] and [`Group::is_listing`], both of which reject a pair on
+/// repetition alone; forming it only gives the two-comment case something to corroborate.
 #[must_use]
 pub fn find_groups(arena: &Arena) -> Vec<Group> {
     let mut groups = Vec::new();
@@ -333,7 +400,7 @@ pub fn find_groups(arena: &Arena) -> Vec<Group> {
         }
         let parent = NodeId(p as u32);
         let kids = element_children(arena, p);
-        if kids.len() < MIN_GROUP {
+        if kids.len() < MIN_SIBLINGS {
             continue;
         }
 
@@ -349,14 +416,68 @@ pub fn find_groups(arena: &Arena) -> Vec<Group> {
             }
         }
 
+        let mut emitted = 0usize;
         for (sig, members) in buckets {
             if members.len() < MIN_GROUP {
                 continue;
             }
+            emitted += 1;
             groups.push(describe(arena, parent, sig, members));
+        }
+
+        // Structure disagreed about every pair of these siblings. Fall back to the site's own claim
+        // about what they are -- their shared `(tag, class)` -- which is the same claim
+        // `merge_by_signature` already trusts, applied here because it can only merge groups that
+        // exist and this parent produced none.
+        //
+        // Found on beebs.hada.io `t/61`: two comments, one carrying an emoji-reaction count and one
+        // with an empty reaction bar, so their signatures diverge within the first 24 descendants
+        // and neither bucket reached two. Nothing was masked, and the first comment was returned as
+        // the article -- defect ③ on a page whose only peculiarity was having few replies.
+        //
+        // Guarded to the case where the structural pass found nothing at all, so no existing group
+        // changes shape: `<li class="comment-tree-item">` may be coarser than a deep signature, but
+        // coarser is what is wanted for items whose *content* is supposed to differ.
+        if emitted == 0 {
+            if let Some(g) = identity_group(arena, parent, &kids) {
+                groups.push(g);
+            }
         }
     }
     groups
+}
+
+/// One group of siblings sharing a tag and a non-empty class, when enough of them do.
+///
+/// Requires a class: a bare `(tag, 0)` identity would group every unadorned `<div>` under a parent,
+/// which is not the site claiming anything.
+fn identity_group(arena: &Arena, parent: NodeId, kids: &[NodeId]) -> Option<Group> {
+    let mut buckets: Vec<((u16, u64), Vec<NodeId>)> = Vec::new();
+    for &k in kids {
+        let id = (
+            arena.tag.get(k.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
+            class_bits(arena, k),
+        );
+        if id.1 == 0 {
+            continue;
+        }
+        match buckets.iter_mut().find(|(i, _)| *i == id) {
+            Some((_, v)) => v.push(k),
+            None => buckets.push((id, alloc::vec![k])),
+        }
+    }
+    // Largest, then document order — the same tie-break rule as everywhere else, so the choice
+    // cannot depend on bucket insertion order (S3).
+    let (id, members) = buckets
+        .into_iter()
+        .filter(|(_, m)| m.len() >= MIN_SIBLINGS)
+        .max_by_key(|(_, m)| m.len())?;
+    // Keyed by identity rather than by structure, which is what this group means. The value only
+    // has to be stable and distinct, and `merge_by_signature` re-keys by identity anyway.
+    Some(Group {
+        by_identity: true,
+        ..describe(arena, parent, id.1 ^ u64::from(id.0), members)
+    })
 }
 
 fn element_children(arena: &Arena, p: usize) -> Vec<NodeId> {
@@ -412,6 +533,8 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
         mean_max_link_share: guarded_div(max_link_share_sum, n),
         mean_first_link_share: guarded_div(first_link_share_sum, n),
         members,
+        // Structural by default; `identity_group` is the one caller that overrides this.
+        by_identity: false,
     }
 }
 
@@ -500,7 +623,7 @@ fn sqrt_approx(x: f32) -> f32 {
 /// candidate's article-only prose is `prose_len[i] - comment_prose[i]`. Computed in one reverse
 /// pass, reusing the same document-order property that makes the main accumulation single-pass.
 #[must_use]
-pub fn mask_comment_prose(arena: &Arena, groups: &[Group]) -> Vec<u32> {
+pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<u32>) -> Vec<u32> {
     // Masking is by *identity*, not by group membership. A reply that is the only child of its own
     // container never forms a group of three, so membership-based masking left six of eighteen
     // comments unmasked -- and the article selection then picked one of the six. Once a group has
@@ -508,7 +631,7 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group]) -> Vec<u32> {
     // comment looks like, so every element matching it is one, thread of one included.
     let mut identities: Vec<(u16, u64)> = Vec::new();
     for g in groups {
-        if !g.is_comment_thread() {
+        if !g.is_comment_thread(stated_total) {
             continue;
         }
         if let Some(&m) = g.members.first() {

@@ -61,15 +61,19 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     let groups = groups::merge_by_signature(arena, &groups::find_groups(arena));
     let page_prose = arena.prose_len.first().copied().unwrap_or(0);
 
+    // What the page says its comment count is. Read before classification, not after, because a
+    // thread of two is only recognisable *with* it -- see `Group::is_comment_thread`.
+    let stated_total = comments::claimed_total(arena);
+
     // The comment thread is the largest qualifying group. Largest rather than first because a page
     // can contain a small "related discussion" widget alongside the real thread.
     let thread = groups
         .iter()
-        .filter(|g| g.is_comment_thread())
+        .filter(|g| g.is_comment_thread(stated_total))
         .max_by_key(|g| g.prose_len);
 
     let masked = if thread.is_some() {
-        groups::mask_comment_prose(arena, &groups)
+        groups::mask_comment_prose(arena, &groups, stated_total)
     } else {
         alloc::vec![0u32; arena.len()]
     };
@@ -94,7 +98,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
                 ..g.clone()
             };
             let mut set = comments::extract(arena, &expanded, limits.max_comment_items);
-            fill_completeness(arena, &mut set);
+            fill_completeness(arena, &mut set, stated_total);
             set
         }
         _ => CommentSet::default(),
@@ -103,7 +107,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     // A listing is a page whose prose is dominated by a repeated group that is *not* a discussion.
     // Checked after selection so that a normal article containing a small related-links list is not
     // mistaken for one.
-    let listing = dominant_listing(&groups, page_prose);
+    let listing = dominant_listing(&groups, page_prose, stated_total);
     if listing && comments.is_empty() {
         selection = Selection {
             article: None,
@@ -262,30 +266,19 @@ pub fn comment_section_nodes(
 ///
 /// The threshold is a *share*, not a count: a front page is mostly its list of items, while an
 /// article that happens to end with a "related posts" block is not.
-fn dominant_listing(groups: &[Group], page_prose: u32) -> bool {
+fn dominant_listing(groups: &[Group], page_prose: u32, stated_total: Option<u32>) -> bool {
     const DOMINANT_SHARE: f32 = 0.55;
     groups
         .iter()
-        .filter(|g| g.is_listing() && !g.is_comment_thread())
+        .filter(|g| g.is_listing() && !g.is_comment_thread(stated_total))
         .any(|g| guarded_div(g.prose_len as f32, page_prose as f32) >= DOMINANT_SHARE)
 }
 
 /// Fill in how much of the thread is present, and how we know.
-fn fill_completeness(arena: &Arena, set: &mut CommentSet) {
-    // The claimed total is stated in page text near the thread; scan the whole document rather than
-    // guess where. Cheap: one pass over prose text nodes.
-    let mut claimed = None;
-    for i in 0..arena.len() {
-        if arena.kind.get(i).copied() != Some(crate::NodeKind::Text) {
-            continue;
-        }
-        let t = arena.own_text(crate::NodeId(i as u32));
-        if let Some(n) = comments::parse_claimed_total(t) {
-            claimed = Some(n);
-            break;
-        }
-    }
-    set.completeness.claimed_total = claimed;
+fn fill_completeness(arena: &Arena, set: &mut CommentSet, stated_total: Option<u32>) {
+    // Passed in rather than re-scanned: the same number decided whether this group counted as a
+    // thread at all, and reading it twice invites the two answers to differ.
+    set.completeness.claimed_total = stated_total;
 
     // Continuation links: anchors whose text offers more of the thread.
     let mut continuation = Vec::new();
@@ -309,7 +302,7 @@ fn fill_completeness(arena: &Arena, set: &mut CommentSet) {
 
     // Invariant: present != claimed_total must imply truncated. Asserting it here rather than
     // hoping, because a silently short thread is the failure this whole struct exists to prevent.
-    let short = claimed.is_some_and(|c| c > set.completeness.present);
+    let short = stated_total.is_some_and(|c| c > set.completeness.present);
     if short || !continuation.is_empty() {
         set.completeness.truncated = true;
         if set.completeness.reason.is_none() {
@@ -322,7 +315,7 @@ fn fill_completeness(arena: &Arena, set: &mut CommentSet) {
     }
     set.completeness.continuation = continuation;
     debug_assert!(
-        claimed.is_none_or(|c| c == set.completeness.present) || set.completeness.truncated,
+        stated_total.is_none_or(|c| c == set.completeness.present) || set.completeness.truncated,
         "present != claimed_total while truncated is false"
     );
 }
@@ -500,11 +493,12 @@ mod tests {
             all_members_have_heading: true,
             mean_max_link_share: 0.6,
             mean_first_link_share: 0.6,
+            by_identity: false,
         };
         assert!(small.is_listing());
-        assert!(!dominant_listing(core::slice::from_ref(&small), 10_000), "5% of the page is not dominant");
+        assert!(!dominant_listing(core::slice::from_ref(&small), 10_000, None), "5% of the page is not dominant");
 
         let big = Group { prose_len: 9_000, ..small };
-        assert!(dominant_listing(&[big], 10_000), "90% of the page is a listing");
+        assert!(dominant_listing(&[big], 10_000, None), "90% of the page is a listing");
     }
 }

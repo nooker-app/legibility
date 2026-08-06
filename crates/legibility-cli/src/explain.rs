@@ -22,12 +22,13 @@ pub fn explain(arena: &Arena, limits: Limits, top: usize) -> String {
     // hypothetical unmasked one. Reproduced rather than shared because `pipeline::run` returns
     // conclusions, not intermediates -- see the note at the end of this function.
     let found = groups::merge_by_signature(arena, &groups::find_groups(arena));
+    let stated = legibility_core::comments::claimed_total(arena);
     let thread = found
         .iter()
-        .filter(|g| g.is_comment_thread())
+        .filter(|g| g.is_comment_thread(stated))
         .max_by_key(|g| g.prose_len);
     let masked = if thread.is_some() {
-        groups::mask_comment_prose(arena, &found)
+        groups::mask_comment_prose(arena, &found, stated)
     } else {
         vec![0u32; arena.len()]
     };

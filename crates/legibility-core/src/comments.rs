@@ -507,6 +507,21 @@ fn link_parents(set: &mut CommentSet) {
     }
 }
 
+/// The comment total the page states about itself, if it states one.
+///
+/// Scans the whole document rather than guessing where the count sits — it is a heading on one
+/// site, a tab label on another, a badge on a third. First match wins; no match means `None`.
+///
+/// Serves two purposes, and the second is load-bearing: [`Completeness::claimed_total`] compares it
+/// against what we extracted, and [`Group::is_comment_thread`] uses it as a **second, independent**
+/// source of evidence that a small set of look-alike siblings is a thread. See that method.
+#[must_use]
+pub fn claimed_total(arena: &Arena) -> Option<u32> {
+    (0..arena.len())
+        .filter(|&i| arena.kind.get(i).copied() == Some(NodeKind::Text))
+        .find_map(|i| parse_claimed_total(arena.own_text(NodeId(i as u32))))
+}
+
 /// Parse a claimed comment total from page text, e.g. "128 comments" or "댓글 3개".
 ///
 /// Returns `None` when the page does not say. Estimating would defeat the purpose: the value
