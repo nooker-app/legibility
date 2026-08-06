@@ -44,6 +44,7 @@ pub mod meta;
 pub mod num;
 pub mod pipeline;
 pub mod score;
+pub mod shape;
 pub mod tag;
 
 pub use arena::{Arena, NodeId, NodeKind};
@@ -53,6 +54,7 @@ pub use groups::{find_groups, Group};
 pub use pipeline::{run as extract_all, Outcome};
 pub use meta::{Candidate as MetaCandidate, Metadata, Source as MetaSource};
 pub use score::{select_article, Candidate, PageStats, Selection};
+pub use shape::{DiscussionShape, Shape};
 pub use tag::TagId;
 
 /// Result of an extraction.
@@ -96,7 +98,12 @@ pub struct Article {
 pub enum NoArticle {
     /// A listing/index page. Not a failure.
     IndexPage,
-    /// A discussion page whose submission carries no prose body.
+    /// A discussion page with neither a submission we could identify nor a body.
+    ///
+    /// Not the same as a link submission: one of those *is* returned, as an article whose
+    /// kind is `DiscussionRoot` and whose payload is the title and the outbound URL. See
+    /// [`shape::DiscussionShape::LinkOnly`] — throwing a pointer away would be worse than
+    /// returning it.
     CommentsOnly,
     /// No text-bearing content at all.
     NoTextContent,

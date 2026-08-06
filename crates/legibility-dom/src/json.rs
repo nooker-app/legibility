@@ -37,21 +37,58 @@ pub fn extraction_json(
             // Comments and the section furniture around them, decided in the pipeline: the
             // serializer is told what to skip rather than deciding for itself.
             let comment_nodes: &[NodeId] = &out.article_exclusions;
-            let (html, rep) = serialize_region_excluding::<Article>(
-                arena,
-                n,
-                SerializeOptions::default(),
-                comment_nodes,
-            );
+            // A link submission has no body. The region around it is a credit bar, the title and
+            // the URL -- and all three are already returned as fields, which is exactly how a
+            // pointer came back looking like a broken article:
+            //
+            //   "r/rss · 2d ago rangeva  [Github] Free news APIs differ ...  [ https://... ]  0"
+            //
+            // So the body is empty by construction and the payload is `url`. Nothing is lost:
+            // the title is `metadata.title` and the destination is right there.
+            let root = out
+                .shape
+                .is_some_and(|sh| sh.kind == legibility_core::DiscussionShape::LinkOnly);
+            let ser = if root {
+                None
+            } else {
+                Some(serialize_region_excluding::<Article>(
+                    arena,
+                    n,
+                    SerializeOptions::default(),
+                    comment_nodes,
+                ))
+            };
+            let rep = ser.as_ref().map_or_else(Default::default, |(_, r)| *r);
             s.push_str("{\"html\":");
-            push_str(&mut s, html.as_str());
+            push_str(&mut s, ser.as_ref().map_or("", |(h, _)| h.as_str()));
             s.push_str(",\"text\":");
-            push_str(&mut s, &prose_text_excluding(arena, n, comment_nodes));
+            push_str(
+                &mut s,
+                &if root {
+                    String::new()
+                } else {
+                    prose_text_excluding(arena, n, comment_nodes)
+                },
+            );
             s.push_str(",\"tag\":");
             push_str(
                 &mut s,
                 arena.tag.get(n.idx()).copied().and_then(TagId::known_name).unwrap_or("?"),
             );
+            // What kind of thing this is, not merely where it was found. A reader renders a
+            // `discussion-root` as a headline that links out and an `article` as prose;
+            // inferring that from an empty `html` would be a guess.
+            s.push_str(",\"kind\":");
+            push_str(&mut s, if root { "discussion-root" } else { "article" });
+            s.push_str(",\"url\":");
+            match out
+                .shape
+                .and_then(|sh| sh.link)
+                .and_then(|a| arena.attr(a, legibility_core::arena::AttrName::HREF))
+            {
+                Some(href) => push_str(&mut s, href),
+                None => s.push_str("null"),
+            }
             s.push_str(",\"prose_len\":");
             // Net of the exclusions, so `prose_len`, `text` and `html` describe the same thing. The
             // raw subtree total would say 441 bytes next to a 280-byte `text` and leave a caller to
@@ -71,7 +108,9 @@ pub fn extraction_json(
                 .copied()
                 .unwrap_or(0)
                 .saturating_sub(excluded);
-            s.push_str(&net.to_string());
+            // Zero for a link submission, because `text` and `html` are empty. The invariant this
+            // field exists to keep is that all three describe the same thing.
+            s.push_str(&if root { 0 } else { net }.to_string());
             s.push_str(",\"confidence\":");
             s.push_str(&out.selection.confidence.to_string());
             s.push_str(",\"dropped_subtrees\":");
@@ -129,6 +168,14 @@ pub fn extraction_json(
         s.push_str(k);
         s.push_str("\":");
         s.push_str(&v.to_string());
+    }
+    // Which submission shape was found, or null on the vast majority of pages that are not
+    // discussions. Reported because "we judged this a pointer" is a claim a bug report needs to
+    // be able to name.
+    s.push_str(",\"discussion_shape\":");
+    match out.shape {
+        Some(sh) => push_str(&mut s, sh.kind.name()),
+        None => s.push_str("null"),
     }
     s.push_str(",\"limits_hit\":[");
     let mut first = true;

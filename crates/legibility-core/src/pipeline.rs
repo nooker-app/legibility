@@ -22,6 +22,7 @@ use crate::groups::{self, Group};
 use crate::meta::{self, Metadata};
 use crate::num::guarded_div;
 use crate::score::{self, Selection};
+use crate::shape;
 use crate::{Limits, NoArticle};
 
 /// Everything the engine concluded about a document.
@@ -47,6 +48,11 @@ pub struct Outcome {
     /// Computed here rather than in the serializer because it is a judgement about content, and the
     /// serializer should only ever be told what to skip. See [`comment_section_nodes`].
     pub article_exclusions: Vec<crate::NodeId>,
+    /// On a discussion page: whether the submission carries a body, and the nodes that say so.
+    ///
+    /// `None` on every page that is not a discussion, which is the overwhelming majority — see
+    /// [`crate::shape::decide`] for why the decision is confined that way.
+    pub shape: Option<crate::shape::Shape>,
 }
 
 /// Run the full pipeline.
@@ -106,16 +112,27 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         };
     }
 
+    let mut sections: Vec<crate::NodeId> = Vec::new();
     let article_exclusions = match selection.article {
         Some(region) => {
             let mut v: Vec<crate::NodeId> = comments.items.iter().map(|c| c.node).collect();
-            v.extend(comment_section_nodes(arena, region, &v));
+            sections = comment_section_nodes(arena, region, &v);
+            v.extend(sections.iter().copied());
             v
         }
         None => Vec::new(),
     };
 
+    // A discussion is a page with replies *or* with the furniture that would hold them. The
+    // second half matters: a link submission with zero replies still has a comment section, and
+    // that is exactly the page whose "article" was a credit bar and a URL.
+    let is_discussion = !comments.items.is_empty() || !sections.is_empty();
+    let shape = selection
+        .article
+        .and_then(|region| shape::decide(arena, region, &article_exclusions, is_discussion));
+
     Outcome {
+        shape,
         selection,
         comment_prose_share: thread
             .map_or(0.0, |g| guarded_div(g.prose_len as f32, page_prose as f32)),

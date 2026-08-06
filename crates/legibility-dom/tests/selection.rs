@@ -208,6 +208,139 @@ fn an_empty_comment_section_is_not_body_text() {
     assert!(!text.contains("Nobody's responded"), "empty comment state in body: {text}");
 }
 
+/// A Reddit post detail page, reduced to the structure that decides the shape: a credit bar
+/// *before* the title, the title, the flair slot, a body, and the comment tree.
+///
+/// `body` is the inner HTML of `<shreddit-post-text-body>`. That one parameter is the entire
+/// difference between the two real posts this pair came from, so the two tests below can only
+/// both pass if the rule reads the body rather than the site.
+fn shreddit_post(body: &str, comments: &str) -> String {
+    format!(
+        "<html><body><main>\
+         <shreddit-post permalink=\"/r/rss/comments/x/\" comment-count=\"0\">\
+           <div slot=\"credit-bar\"><a href=\"/r/rss/\">r/rss</a>\
+             <span>•</span><time datetime=\"2026-08-03T00:00:00Z\">2d ago</time>\
+             <a href=\"/user/rangeva/\">rangeva</a></div>\
+           <h1 slot=\"title\">Free news APIs differ in historical coverage and search filters</h1>\
+           <shreddit-post-flair slot=\"post-flair\"></shreddit-post-flair>\
+           <shreddit-post-text-body slot=\"text-body\">{body}</shreddit-post-text-body>\
+           <div slot=\"action-row\"><button>Upvote</button><span>1</span>\
+             <button>Downvote</button><button>Reply</button><button>Share</button></div>\
+         </shreddit-post>\
+         <shreddit-comment-tree id=\"comment-tree\">{comments}</shreddit-comment-tree>\
+         </main></body></html>"
+    )
+}
+
+/// `(kind, url, text)` as a consumer sees them.
+///
+/// Read out of the serialized JSON rather than off `Outcome`, because for a link submission the
+/// emptying of `text` *is* the contract and it lives in the serializer. Field slicing is naive
+/// on purpose — these fixtures contain no quotes or backslashes — and a hand-rolled reader here
+/// is preferable to giving the test crate a JSON dependency the engine does not have.
+fn extract_shape(html: &str) -> (String, String, String) {
+    let (arena, hit) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let json = legibility_dom::json::extraction_json(&arena, &out, hit, None);
+    let field = |key: &str| -> String {
+        let pat = format!("\"{key}\":\"");
+        match json.find(&pat) {
+            Some(at) => {
+                let rest = &json[at + pat.len()..];
+                rest[..rest.find('"').unwrap_or(0)].to_string()
+            }
+            None => String::new(),
+        }
+    };
+    (field("kind"), field("url"), field("text"))
+}
+
+#[test]
+fn a_submission_whose_body_is_one_link_is_a_pointer_not_an_article() {
+    // The reported defect. The body is a single anchor -- the poster pasted markdown wrongly, so
+    // the brackets survive as prose -- and the region that won was the whole submission: credit
+    // bar, title, URL and a stray score. Every byte of that is already a metadata field.
+    //
+    // The discriminator is not length. It is that this block's prose *is* its anchor text, which
+    // is the scorer's own candidacy floor (`Candidate::is_viable`), so no character threshold
+    // enters the decision.
+    let html = shreddit_post(
+        "<div class=\"md\"><p>[<a href=\"https://github.com/free-news-api/news-api\">\
+         https://github.com/free-news-api/news-api</a>]</p></div>",
+        "<section><p>Be the first to comment</p>\
+         <p>Nobody's responded to this post yet. Add your thoughts and get the conversation \
+         going, because this block is longer and denser than the submission itself.</p></section>",
+    );
+    let (kind, url, text) = extract_shape(&html);
+    assert_eq!(kind, "discussion-root", "a pointer must not be served as an article");
+    assert_eq!(url, "https://github.com/free-news-api/news-api");
+    // No body at all, rather than a body made of the byline and the URL. Those are already
+    // `metadata.byline` and `article.url`; returning them twice, as prose, is the defect.
+    assert_eq!(text, "", "a pointer must have an empty body, got: {text}");
+}
+
+#[test]
+fn a_submission_with_prose_keeps_its_prose_and_loses_its_furniture() {
+    // Same site, same template, opposite shape -- and the same code has to reach the other
+    // answer. Applying the link-only rule here would throw the body away; applying this one to
+    // the post above would return the credit bar. That is why the pair is one test each.
+    let html = shreddit_post(
+        "<div class=\"md\"><p>I'm very new to RSS and just started setting up apps (Feeder). \
+         I follow football closely and wanted to make a list, but I can't seem to add this \
+         website for some reason. Any help would be great.</p>\
+         <p><a href=\"https://www.sport.es/es/\">https://www.sport.es/es/</a></p>\
+         <p>This is the website.</p></div>",
+        "<shreddit-comment thingid=\"t1_a\" depth=\"0\"><div class=\"md\">\
+         <p>Try this https://www.sport.es/es/rss/</p></div></shreddit-comment>\
+         <shreddit-comment thingid=\"t1_b\" depth=\"1\" parentid=\"t1_a\"><div class=\"md\">\
+         <p>Tried it, nothing happened. I am still stuck on this and cannot work it out.</p>\
+         </div></shreddit-comment>",
+    );
+    let (kind, _, text) = extract_shape(&html);
+    assert_eq!(kind, "article");
+    assert!(text.contains("very new to RSS"), "the body is missing: {text}");
+    assert!(text.contains("This is the website"), "the body was truncated: {text}");
+    assert!(!text.contains("Try this"), "a comment leaked into the body: {text}");
+    // The title and byline still prefix this body. That is plan D4's `lead` and not fixed here:
+    // removing them needs byline detection, and the length-comparison version of it cost four
+    // corpus families at once (see `shape::decide`).
+}
+
+#[test]
+fn an_ordinary_article_with_an_empty_comment_section_is_not_reshaped() {
+    // The blast radius, pinned. This page *is* a discussion by the same test -- it has comment
+    // furniture and no replies -- so the rule runs on it. It must find the body and leave
+    // everything alone, because the alternative is that a news site with a dead Disqus embed
+    // starts returning `discussion-root` and no text at all.
+    let html = "<html><body><main>\
+        <div class=\"byline\"><a href=\"/staff/j\">Jane Roe</a><time>2026-08-01</time></div>\
+        <h1>A perfectly ordinary news article</h1>\
+        <div class=\"body\"><p>The first paragraph of a story that has nothing to do with \
+        link aggregators, long enough that no length rule could confuse it for a pointer.</p>\
+        <p>A second paragraph, because one is not a body.</p></div>\
+        <div id=\"disqus_thread\"><p>Comments are closed for this article.</p></div>\
+        </main></body></html>";
+    let (kind, _, text) = extract_shape(html);
+    assert_eq!(kind, "article", "a page with prose is never a pointer");
+    assert!(text.contains("first paragraph"), "the body was lost: {text}");
+    assert!(!text.contains("Comments are closed"), "comment furniture in body: {text}");
+}
+
+#[test]
+fn a_page_with_no_comment_furniture_gets_no_opinion_at_all() {
+    // Most of the web. `shape` must be `None`, not `WithBody`: the two are different claims and
+    // only one of them is honest about a page we never examined for a submission.
+    let html = "<html><body><main><article>\
+        <h1>Just an article</h1>\
+        <p>Prose that stands alone with no discussion attached to it whatsoever, and so the \
+        shape decision has nothing to say about this page.</p>\
+        <p>A second paragraph to keep the region from being a single block.</p>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    assert!(out.shape.is_none(), "shape decided on a page with no discussion");
+}
+
 #[test]
 fn a_comment_shaped_class_on_article_prose_is_not_removed_wholesale() {
     // The guard. `class="comment-policy"` on an article *about* moderation must not take the
