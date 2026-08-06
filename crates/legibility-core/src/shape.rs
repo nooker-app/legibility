@@ -94,6 +94,11 @@ pub struct Shape {
     pub body: Option<NodeId>,
     /// For [`DiscussionShape::LinkOnly`]: the outbound anchor, if the submission has one.
     pub link: Option<NodeId>,
+    /// Plan D4's `lead.byline_span`: the dateline that precedes the headline, when there is one.
+    ///
+    /// Unlike [`Self::body`] this *is* acted on — the caller excludes it. See
+    /// [`submission_byline`] for why removing this is safe where narrowing to `body` was not.
+    pub byline: Option<NodeId>,
 }
 
 /// Decide the shape of a discussion page's submission.
@@ -151,6 +156,11 @@ pub fn decide(
         ),
         None => (region.idx() + 1, region_end),
     };
+
+    // Direct children of whatever the search is scoped to. `start` is the container node itself
+    // in the narrowed case, so its children begin one past it.
+    let children_start = container.map_or(region.idx() + 1, |c| c.idx() + 1);
+    let byline = submission_byline(arena, children_start, end, title, title_prose);
 
     let mut body: Option<NodeId> = None;
     let mut body_prose = 0u32;
@@ -210,6 +220,7 @@ pub fn decide(
             title,
             body,
             link,
+            byline,
         })
     } else {
         Some(Shape {
@@ -217,8 +228,67 @@ pub fn decide(
             title,
             body: None,
             link,
+            byline,
         })
     }
+}
+
+/// The dateline sitting in front of the headline: plan D4's `lead.byline_span`.
+///
+/// On every discussion site the submission opens with a credit bar — subreddit or site link,
+/// author, score, permalink, and a timestamp — and it rides in front of the body because it is
+/// inside the same container. It is not prose; every one of its fields is already returned as a
+/// metadata candidate with provenance.
+///
+/// # Why this is allowed to remove text when narrowing to `body` was not
+///
+/// The reverted approach (see [`decide`]) *chose a new region* by comparing prose mass, so it
+/// could and did pick an ad rail or a comment list over the article. This removes a **single
+/// direct child** identified by a structural fact instead of a size comparison: it precedes the
+/// headline and it contains a `<time>`. Nothing that is article prose satisfies that — a dateline
+/// before the headline is the only construct on the web that does.
+///
+/// Three guards keep it from ever reaching an article's text. It runs only when
+/// `is_discussion`, so the 130-page corpus cannot enter it at all. It refuses any child holding
+/// a heading of its own, so a nested submission or a section title is never swallowed. And it
+/// refuses a child that out-masses the headline, reusing the same comparison the shape rule
+/// already trusts — if something bigger than the title precedes the title, this module has
+/// misread the page and the safe move is to keep the text.
+fn submission_byline(
+    arena: &Arena,
+    children_start: usize,
+    end: usize,
+    title: NodeId,
+    title_prose: u32,
+) -> Option<NodeId> {
+    let mut c = children_start;
+    while c < end && c < title.idx() {
+        let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
+        // Only children that end before the title starts. A child spanning the title is a
+        // wrapper, and removing a wrapper would take the submission with it.
+        if child_end > title.idx() {
+            break;
+        }
+        if arena.kind.get(c).copied() == Some(NodeKind::Element)
+            && arena.prose_len.get(c).copied().unwrap_or(0) <= title_prose
+            && subtree_has(arena, c, child_end, TagId::TIME)
+            && !subtree_has_heading(arena, c, child_end)
+        {
+            return Some(NodeId(c as u32));
+        }
+        c = child_end;
+    }
+    None
+}
+
+/// Whether `tag` appears anywhere in `[from, to)`.
+fn subtree_has(arena: &Arena, from: usize, to: usize, tag: TagId) -> bool {
+    (from..to.min(arena.len())).any(|i| arena.tag.get(i).copied() == Some(tag))
+}
+
+/// Whether any heading appears in `[from, to)`.
+fn subtree_has_heading(arena: &Arena, from: usize, to: usize) -> bool {
+    (from..to.min(arena.len())).any(|i| is_heading(arena, NodeId(i as u32)))
 }
 
 /// The submission's title: the first heading in the region that carries prose.

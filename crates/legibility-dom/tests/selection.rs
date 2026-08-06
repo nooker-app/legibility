@@ -506,6 +506,74 @@ fn a_heading_that_only_repeats_the_title_is_dropped_but_a_differing_one_is_kept(
         </article></main></body></html>";
     let (_, text2, _) = extract(differs);
     assert!(text2.contains("never mentions"), "a real heading was dropped: {text2}");
+
+    // The case exact equality could not see, and the reason this test exists twice. A `<title>`
+    // nearly always carries the site name and an `<h1>` nearly never does, so requiring equality
+    // meant the rule never fired on a real page -- the Reddit post it was written for kept its
+    // duplicated headline through two rounds of "fixed".
+    let suffixed = "<html><head><title>New to RSS here, why can't i add this site? : r/rss\
+        </title></head><body><main>\
+        <article><h1>New to RSS here, why can't i add this site?</h1>\
+        <p>The body itself, long enough to carry this region past anything else here.</p>\
+        </article></main></body></html>";
+    let (_, text3, _) = extract(suffixed);
+    assert!(
+        !text3.contains("New to RSS here"),
+        "a title suffix hid the duplication: {text3}"
+    );
+    assert!(text3.contains("The body itself"), "the body was lost: {text3}");
+}
+
+#[test]
+fn the_dateline_before_a_discussion_headline_goes_but_an_articles_stays() {
+    // Plan D4's `lead.byline_span`. Every discussion site opens the submission with a credit bar
+    // -- community link, author, timestamp -- and it rode in front of the body because it lives in
+    // the same container. Every field of it is already a metadata candidate with provenance.
+    //
+    // Narrowing the region to the body was tried twice for this and reverted twice, because
+    // "widest prose block" is a cruder rule than the scorer's and cost three corpus pages ~85% of
+    // their text. This removes one direct child on a structural fact instead: it precedes the
+    // headline and it carries a `<time>`.
+    let mut post = String::from(
+        "<html><head><title>Which feed reader do you use? : r/rss</title></head><body><main>\
+         <div><a href=\"/r/rss/\">r/rss</a><time datetime=\"2026-07-24T20:36:22Z\">12d ago</time>\
+           <a href=\"/user/someone/\">someone</a></div>\
+         <h1>Which feed reader do you use?</h1>\
+         <div><p>I have been trying a few and cannot decide, so I would like to hear what \
+           everyone else has settled on and why.</p></div>",
+    );
+    // The comment section is what makes this a discussion page at all, and the gate the byline
+    // rule sits behind.
+    for i in 0..6 {
+        post.push_str(&format!(
+            "<div class=\"comment\"><a href=\"/user/u{i}/\">u{i}</a>\
+             <time datetime=\"2026-07-25T0{i}:00:00Z\">1d</time>\
+             <p>Reply number {i}, with enough words in it to read as an actual comment body.</p>\
+             </div>"
+        ));
+    }
+    post.push_str("</main></body></html>");
+    let (_, text, n) = extract(&post);
+    assert!(n >= 5, "the comment group was not found, so the gate never opened: {n}");
+    assert!(text.contains("cannot decide"), "the body was lost: {text}");
+    assert!(!text.contains("12d ago"), "the dateline survived: {text}");
+    assert!(!text.contains("someone"), "the byline survived: {text}");
+
+    // A news article has a dateline in the same position, and it must keep it: this page is not a
+    // discussion, so `shape` is `None` and the rule is unreachable. That gate is why the 130-page
+    // corpus cannot regress here.
+    let news = "<html><head><title>Markets close higher — Daily</title></head><body><main>\
+        <article>\
+        <div>By A Reporter <time datetime=\"2026-07-24T20:36:22Z\">24 July 2026</time></div>\
+        <h1>Markets close higher</h1>\
+        <p>Equities finished the session up across the board, with the broadest gains in \
+          industrials and a late rally in energy.</p>\
+        </article></main></body></html>";
+    let (_, news_text, _) = extract(news);
+    assert!(
+        news_text.contains("A Reporter") && news_text.contains("24 July 2026"),
+        "an article lost its dateline: {news_text}"
+    );
 }
 
 #[test]

@@ -150,6 +150,11 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
             }
         }
     }
+    // The dateline in front of the headline, on discussion pages only. `shape` is `None` for
+    // every other page on the web, so no article can reach this.
+    if let Some(b) = shape.and_then(|s| s.byline) {
+        article_exclusions.push(b);
+    }
 
     Outcome {
         shape,
@@ -362,13 +367,29 @@ fn declared_title(m: &Metadata) -> Option<&str> {
 /// title is already a metadata field with provenance, and repeating it inside the article is not
 /// an extra fact.
 ///
-/// Deliberately narrow. Only the first `h1`/`h2` carrying prose is considered, and only exact
-/// equality after folding — Readability uses a 75%-similarity test, which would let a heading go
-/// that merely resembles the title, and losing a real heading is worse than keeping a redundant
-/// one. Plan D4 reports the span as `lead.heading_span`; this is the removal half only.
+/// # Why the comparison is directional rather than an equality test
+///
+/// The first attempt required exact equality after whitespace and case folding, on the theory
+/// that anything looser risks dropping a real heading. It does not fire on the pages it exists
+/// for, because a `<title>` nearly always carries the site name and an `<h1>` nearly never does:
+///
+/// ```text
+///   <title>  New to RSS here, why can't i use this website to add to my feed? : r/rss
+///   <h1>     New to RSS here, why can't i use this website to add to my feed?
+/// ```
+///
+/// The measurement that separates "restates the title" from "says something new" is asymmetric:
+/// **how much of the heading is already in the title.** Suffixes the title adds are then free,
+/// and a heading carrying its own words survives, because its own words are exactly what fails to
+/// match. This is Readability's `_textSimilarity` in the same direction and at the same threshold,
+/// which matters beyond agreeing with it — the corpus `expected.html` files were produced by that
+/// rule, so any other threshold reads as a difference from ground truth.
+///
+/// Only the first `h1`/`h2` carrying prose is considered. Plan D4 reports the span as
+/// `lead.heading_span`; this is the removal half only.
 fn duplicate_heading(arena: &Arena, region: crate::NodeId, title: &str) -> Option<crate::NodeId> {
     let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
-    let want = fold(title);
+    let want = tokens(title);
     if want.is_empty() {
         return None;
     }
@@ -385,9 +406,57 @@ fn duplicate_heading(arena: &Arena, region: crate::NodeId, title: &str) -> Optio
         if arena.prose_len.get(i).copied().unwrap_or(0) == 0 {
             continue;
         }
-        return (fold(&node_prose(arena, i)) == want).then_some(crate::NodeId(i as u32));
+        let heading = tokens(&node_prose(arena, i));
+        return restates(&want, &heading).then_some(crate::NodeId(i as u32));
     }
     None
+}
+
+/// Share of a heading's text that the title already contains, tested against 0.75.
+///
+/// Weighted by token length, not token count, so that a heading differing by one long word is
+/// judged differently from one differing by an article or a preposition — Readability measures the
+/// same way, by joined string length.
+fn restates(title: &[alloc::string::String], heading: &[alloc::string::String]) -> bool {
+    if title.is_empty() || heading.is_empty() {
+        return false;
+    }
+    let joined = |toks: &[alloc::string::String]| -> usize {
+        toks.iter().map(alloc::string::String::len).sum::<usize>() + toks.len().saturating_sub(1)
+    };
+    let mut absent_len = 0usize;
+    let mut absent_n = 0usize;
+    for t in heading {
+        if !title.iter().any(|x| x == t) {
+            absent_len += t.len();
+            absent_n += 1;
+        }
+    }
+    let absent = absent_len + absent_n.saturating_sub(1);
+    guarded_div(absent as f32, joined(heading) as f32) < 0.25
+}
+
+/// Lowercased alphanumeric runs.
+///
+/// Unicode-aware rather than Readability's `\W+`, which classifies every CJK codepoint as a
+/// separator and so produces an empty token list for a Korean or Japanese heading — the
+/// comparison would then never fire on exactly the pages this project is being built to read.
+/// Here a run of ideographs is one token, which is coarse but conservative: it can only make the
+/// test stricter, never looser.
+fn tokens(s: &str) -> alloc::vec::Vec<alloc::string::String> {
+    let mut out = alloc::vec::Vec::new();
+    let mut cur = alloc::string::String::new();
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            cur.extend(c.to_lowercase());
+        } else if !cur.is_empty() {
+            out.push(core::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// Prose text of a subtree, whitespace-collapsed.
@@ -406,23 +475,6 @@ fn node_prose(arena: &Arena, node: usize) -> alloc::string::String {
                 out.push(' ');
             }
             out.push_str(w);
-        }
-    }
-    out
-}
-
-/// Case- and whitespace-insensitive form for comparing a heading against a title.
-///
-/// No NFKC: plan §M3 forbids it, because folding full-width to ASCII changes CJK text rather than
-/// normalising it. Lowercasing is inside the comparator only, never applied to a returned value.
-fn fold(s: &str) -> alloc::string::String {
-    let mut out = alloc::string::String::new();
-    for w in s.split_whitespace() {
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        for c in w.chars().flat_map(char::to_lowercase) {
-            out.push(c);
         }
     }
     out
