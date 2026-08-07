@@ -70,6 +70,37 @@ jobs:
       - name: Formatting
         run: cargo fmt --all -- --check
 
+  # A short run of each fuzz target on every change. Not to find bugs — that is `fuzz.yml`, nightly,
+  # at fifteen minutes a target — but to catch the two failures a scheduled job would report a day
+  # late: a target that no longer compiles against the engine, and one that fails on the first input.
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nightly toolchain
+        run: |
+          rustup toolchain install "$(cat nightly-toolchain.txt)" --profile minimal --component rust-src \
+            || rustup toolchain install nightly --profile minimal --component rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || cargo install cargo-fuzz
+
+      - name: Smoke each target
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for t in extract_bytes sanitize_roundtrip_article sanitize_roundtrip_ugc \
+                   structure_aware determinism_differential; do
+            echo "::group::$t"
+            cargo fuzz run "$t" -- -max_total_time=60 -rss_limit_mb=2048 -malloc_limit_mb=512 -timeout=5
+            echo "::endgroup::"
+          done
+
   # The two checks that cannot run on Linux. Kept in their own job so a Linux-only failure is never
   # reported as an iOS problem, and so the expensive runner is not in the critical path.
   macos:

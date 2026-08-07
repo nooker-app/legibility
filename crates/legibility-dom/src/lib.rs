@@ -773,18 +773,25 @@ impl BuildArena {
             return false;
         }
         let (_, end) = b.push_text(text, &self.limits);
-        let start = match b.nodes.get_mut(id as usize) {
+        // The icon-glyph signal is a property of the whole node — a private-use run followed by a
+        // real word is not an icon — but it is an *AND*, so it folds incrementally: the merged text
+        // is all private-use exactly when the node already was and the arriving chunk is too.
+        //
+        // Re-scanning the merged span instead was O(node) per append and therefore O(n^2) over a
+        // run of text. A fuzz case found it immediately: 50 KB of carriage returns arrives as 50,000
+        // one-character appends and took **905 ms** to parse, against a 125 MiB/s budget. Nothing in
+        // the corpus is shaped like that, which is exactly why a fuzzer had to be the one to say so.
+        let stays_pua = is_private_use_only(text);
+        match b.nodes.get_mut(id as usize) {
             Some(n) => {
                 n.text.1 = end;
-                n.text.0
+                n.own_role = if n.own_role == TextRole::Control && stays_pua {
+                    TextRole::Control
+                } else {
+                    TextRole::Prose
+                };
             }
             None => return false,
-        };
-        // The icon-glyph signal is a property of the whole node, so it has to be re-decided against
-        // the merged text: a private-use run followed by a real word is not an icon.
-        let pua = is_private_use_only(b.doc_buf.get(start as usize..end as usize).unwrap_or(""));
-        if let Some(n) = b.nodes.get_mut(id as usize) {
-            n.own_role = if pua { TextRole::Control } else { TextRole::Prose };
         }
         true
     }

@@ -1098,3 +1098,26 @@ fn a_credit_bar_goes_even_with_no_comments_and_no_title_but_a_dateline_stays() {
         "a news dateline was removed as a credit bar: {news_text}"
     );
 }
+
+#[test]
+fn a_long_run_of_whitespace_merges_into_one_node() {
+    // Found by `structure_aware` within a minute of first running it: 50 KB of carriage returns is
+    // 50,000 one-character `AppendText` calls, and the merge path re-scanned the whole merged node
+    // for private-use codepoints on each one — 905 ms to parse 50 KB, against a 125 MiB/s budget.
+    //
+    // Asserted as a node count rather than a duration. The count is the *cause*: the quadratic is
+    // only reachable if the run fails to merge, so this catches the regression deterministically,
+    // with no wall clock to flake and no `Instant::now` — which `clippy.toml` disallows precisely so
+    // that no clock creeps anywhere near the engine.
+    //
+    // Nothing in the 130-page corpus is shaped like this, which is why a fuzzer had to be the one to
+    // say so.
+    let body = "\r".repeat(50_000);
+    let html = format!("<html><head><title>t</title></head><body>{body}</body></html>");
+    let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    assert!(
+        arena.len() < 32,
+        "50,000 whitespace tokens became {} nodes instead of one",
+        arena.len()
+    );
+}

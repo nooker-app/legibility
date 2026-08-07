@@ -1,0 +1,67 @@
+# Fuzzing, on a schedule rather than per push.
+#
+# The five targets found three real defects within a minute each on their first run — a quadratic in
+# text-node merging (905 ms to parse 50 KB), a fixpoint assertion stricter than the contract, and a
+# harness bug of my own. None of them is reachable from the corpus, which is the argument for having
+# them: the corpus is 130 pages someone chose, and these are the inputs nobody would think to write.
+#
+# Nightly, because a useful fuzz run is minutes and a PR gate is seconds. The PR gate gets a 60s
+# smoke of each target instead, in `ci.yml`, which catches a target that no longer builds or that
+# fails instantly.
+name: fuzz
+
+on:
+  schedule:
+    # 04:00 UTC daily. No overlap with the pages deploy, and off the working day.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      # One job per target so a crash names the target in the run list, and so one failing target
+      # does not cancel the other four.
+      fail-fast: false
+      matrix:
+        target:
+          - extract_bytes
+          - sanitize_roundtrip_article
+          - sanitize_roundtrip_ugc
+          - structure_aware
+          - determinism_differential
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nightly toolchain
+        run: |
+          rustup toolchain install "$(cat nightly-toolchain.txt)" --profile minimal --component rust-src \
+            || rustup toolchain install nightly --profile minimal --component rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || cargo install cargo-fuzz
+
+      # `-rss_limit_mb` and `-malloc_limit_mb` turn an unbounded allocation into a crash rather than
+      # a killed runner, and `-timeout` turns a quadratic into a reported artifact — which is how
+      # the 50 KB-of-carriage-returns case surfaced at all.
+      - name: Fuzz ${{ matrix.target }}
+        working-directory: fuzz
+        run: |
+          cargo fuzz run ${{ matrix.target }} -- \
+            -max_total_time=900 -rss_limit_mb=2048 -malloc_limit_mb=512 -timeout=5
+
+      # A crash is only useful if the input survives the runner.
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

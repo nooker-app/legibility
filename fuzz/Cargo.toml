@@ -1,0 +1,63 @@
+# Fuzz targets. Deliberately **not** a workspace member: `cargo-fuzz` needs a nightly toolchain and
+# `-Z sanitizer`, and pulling that into the workspace would drag every ordinary `cargo test` onto
+# nightly with it. Plan §1.6's two-toolchain policy is exactly this split — stable pins build, test
+# and clippy; a pinned nightly (see `nightly-toolchain.txt`) is invoked explicitly, here.
+[package]
+name = "legibility-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+legibility-core = { path = "../crates/legibility-core" }
+legibility-dom = { path = "../crates/legibility-dom" }
+legibility-sanitize = { path = "../crates/legibility-sanitize" }
+
+# `overflow-checks` on, because an arithmetic overflow is an S1 violation and the whole point of
+# fuzzing is to find one. Without this the release profile wraps silently and the target passes.
+[profile.release]
+debug = true
+overflow-checks = true
+
+[workspace]
+
+[[bin]]
+name = "extract_bytes"
+path = "fuzz_targets/extract_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize_roundtrip_article"
+path = "fuzz_targets/sanitize_roundtrip_article.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize_roundtrip_ugc"
+path = "fuzz_targets/sanitize_roundtrip_ugc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structure_aware"
+path = "fuzz_targets/structure_aware.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "determinism_differential"
+path = "fuzz_targets/determinism_differential.rs"
+test = false
+doc = false
+bench = false
