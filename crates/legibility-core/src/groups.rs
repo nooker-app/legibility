@@ -276,6 +276,9 @@ fn class_bits(arena: &Arena, node: NodeId) -> u64 {
     let Some(class) = arena.attr(node, AttrName::CLASS) else { return 0 };
     let mut acc = 0u64;
     for token in class.split_ascii_whitespace() {
+        if is_per_item_class(token) {
+            continue;
+        }
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         for b in token.bytes() {
             h ^= u64::from(b);
@@ -284,6 +287,21 @@ fn class_bits(arena: &Arena, node: NodeId) -> u64 {
         acc ^= h;
     }
     acc
+}
+
+/// Whether a class token is an identifier for *this item* rather than a description of its kind.
+///
+/// `WordPress` writes `class="comment-215101"` on every comment and `post-12345` on every post, so
+/// thirteen structurally identical comments hashed thirteen different ways, no group of three ever
+/// formed, and the thread went undetected — one of its members was then selected as the article. A
+/// class that differs per item cannot be evidence about what kind of item it is.
+///
+/// Narrow on purpose: a trailing run of **four or more** digits. `col-md-6`, `mt-4` and `h1` are
+/// layout classes shared across items and keep their meaning; a four-digit tail is an id. Being
+/// wrong here can only make two items look *more* alike, and every other gate still applies.
+fn is_per_item_class(token: &str) -> bool {
+    let digits = token.bytes().rev().take_while(u8::is_ascii_digit).count();
+    digits >= 4 && digits < token.len()
 }
 
 /// Whether `node`'s subtree carries an author link.
@@ -325,6 +343,18 @@ fn has_author_link(arena: &Arena, node: NodeId, end: usize) -> bool {
 }
 
 /// Whether `node`'s subtree carries a timestamp.
+///
+/// `<time>` and `datetime` first, because those are the page saying so. Failing that, a *written*
+/// date: plenty of templates predate `<time>` and simply print one. On the corpus page `pixnet`
+/// every comment byline reads
+///
+/// ```text
+///   <span class="post-time">於 2013/12/28 10:28</span>
+/// ```
+///
+/// so the element test found nothing, the micro-metadata gate never reached two signals, no group
+/// formed, and all 39 comments were merged into the article — which came out at 3.2x its expected
+/// length.
 fn has_timestamp(arena: &Arena, node: NodeId, end: usize) -> bool {
     for i in node.idx()..end {
         if arena.tag.get(i).copied() == Some(TagId::TIME) {
@@ -334,8 +364,60 @@ fn has_timestamp(arena: &Arena, node: NodeId, end: usize) -> bool {
         if arena.attr(id, AttrName::DATETIME).is_some() {
             return true;
         }
+        if arena.kind.get(i).copied() == Some(NodeKind::Text)
+            && looks_like_a_date(arena.own_text(id))
+        {
+            return true;
+        }
     }
     false
+}
+
+/// Longest text that can still be read as a date rather than as prose mentioning one.
+///
+/// A byline is short. A paragraph that happens to contain "in 1998 the company moved" is not, and
+/// the point of the bound is that the second kind never reaches the digit tests below.
+const DATE_TEXT_MAX: usize = 48;
+
+/// Whether a short run of text is written like a date.
+///
+/// Deliberately narrow: a four-digit year between 1900 and 2099, **and** two further runs of one or
+/// two digits, in a text node short enough to be a byline. That matches `2013/12/28 10:28`,
+/// `2013-12-28 10:28`, `2013年12月28日` and `28.12.2013 10:28` without matching a sentence, a price,
+/// a phone number or an article about a year — none of which carry two more small numbers in
+/// forty-eight characters.
+///
+/// A month *name* is not accepted. Doing so needs a list per language, and the languages this
+/// project is being built to read do not spell months in letters.
+#[doc(hidden)]
+#[must_use]
+pub fn looks_like_a_date_for_test(text: &str) -> bool {
+    looks_like_a_date(text)
+}
+
+fn looks_like_a_date(text: &str) -> bool {
+    let t = text.trim();
+    if t.len() > DATE_TEXT_MAX {
+        return false;
+    }
+    let mut year = false;
+    let mut small = 0usize;
+    let mut digits = 0usize;
+    // One pass, closing each digit run as it ends. `chars` rather than bytes so a CJK separator
+    // (年, 月, 日) closes a run like any other non-digit.
+    for c in t.chars().chain(core::iter::once(' ')) {
+        if c.is_ascii_digit() {
+            digits += 1;
+            continue;
+        }
+        match digits {
+            1 | 2 => small += 1,
+            4 => year = true,
+            _ => {}
+        }
+        digits = 0;
+    }
+    year && small >= 2
 }
 
 /// Whether `node` or a descendant carries an id, which is how permalinks are anchored.

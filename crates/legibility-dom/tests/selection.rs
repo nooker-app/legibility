@@ -1205,3 +1205,71 @@ fn serialize_article(html: &str) -> String {
         );
     h.as_str().to_string()
 }
+
+#[test]
+fn a_written_date_counts_as_a_timestamp_but_prose_about_a_year_does_not() {
+    // `pixnet`: every comment byline is `<span class="post-time">於 2013/12/28 10:28</span>`. No
+    // `<time>`, no `datetime`, so the micro-metadata gate never reached two signals, no group
+    // formed, and all 39 comments were merged into the article — 3.2x its expected length.
+    let mut html = String::from(
+        "<html><head><title>露營記錄</title></head><body><main>\
+         <article><h1>露營記錄</h1>\
+         <p>這次的營地在新竹尖石，海拔一千兩百公尺，天氣很好，晚上還看得到星星。</p>\
+         <p>營地的設施算是完整，衛浴乾淨，水源穩定，適合帶小孩一起來。</p></article>\
+         <div id=\"comment-text\"><ul>",
+    );
+    for i in 0..4 {
+        html.push_str(&format!(
+            "<li class=\"post-info\" id=\"comment-588244{i}\"><span class=\"user-name\">\
+             <a href=\"http://u{i}.example.test/blog\" rel=\"nofollow\">訪客{i}</a></span>\
+             <span class=\"post-time\">於 2013/12/2{i} 10:28</span>\
+             <div class=\"content\"><p>謝謝分享，下次也想去這個營地看看，請問開車方便嗎？</p></div>\
+             </li>"
+        ));
+    }
+    html.push_str("</ul></div></main></body></html>");
+    let (_, text, n) = extract(&html);
+    assert_eq!(n, 4, "written-date bylines did not form a thread");
+    assert!(text.contains("海拔一千兩百公尺"), "the article was lost: {text}");
+    assert!(!text.contains("開車方便嗎"), "a comment leaked into the body: {text}");
+
+    // The bound is what keeps it narrow: a paragraph *about* a year is not a byline. Four digits
+    // plus two small numbers only counts inside something byline-sized.
+    assert!(!legibility_core::groups::looks_like_a_date_for_test(
+        "The company moved in 1998, employing 12 people across 3 sites, and grew steadily after that."
+    ));
+    assert!(legibility_core::groups::looks_like_a_date_for_test("2013/12/28 10:28"));
+    assert!(legibility_core::groups::looks_like_a_date_for_test("2013年12月28日"));
+    assert!(!legibility_core::groups::looks_like_a_date_for_test("2013"));
+}
+
+#[test]
+fn a_per_item_class_does_not_split_one_template_into_thirteen() {
+    // WordPress writes `class="comment-215101"` on every comment, so thirteen structurally
+    // identical siblings hashed thirteen different ways, no group of three formed, the thread went
+    // undetected, and one of its members was selected as the article.
+    let mut html = String::from(
+        "<html><head><title>On testing</title></head><body><main>\
+         <article><h1>On testing</h1>\
+         <p>Certification schemes are expensive to run and the value is hard to demonstrate, which \
+           is why so few of them survive their first funding round.</p>\
+         <p>The alternative most projects reach for is a public test suite anyone can run.</p>\
+         </article>\
+         <div id=\"comments\">",
+    );
+    for i in 0..5 {
+        html.push_str(&format!(
+            "<div class=\"comment-21510{i} even thread-even\">\
+             <article class=\"comment-body\"><footer class=\"comment-meta\">\
+             <a class=\"url\" href=\"/user/reader{i}\">reader{i}</a>\
+             <time datetime=\"2026-08-0{i}T10:00:00Z\">Aug {i}</time></footer>\
+             <div class=\"comment-content\"><p>Were you volunteering to help design the tests, or \
+               at least set up the means to organize it?</p></div></article></div>"
+        ));
+    }
+    html.push_str("</div></main></body></html>");
+    let (_, text, n) = extract(&html);
+    assert_eq!(n, 5, "per-item classes split the thread");
+    assert!(text.contains("Certification schemes"), "the article was lost: {text}");
+    assert!(!text.contains("volunteering to help"), "a comment leaked into the body: {text}");
+}
