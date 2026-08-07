@@ -1059,3 +1059,52 @@ fn a_page_whose_article_is_body_itself_is_not_a_refusal() {
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
     assert!(out.selection.article.is_none(), "a page of links came back as an article");
 }
+
+#[test]
+fn a_credit_bar_goes_even_with_no_comments_and_no_title_but_a_dateline_stays() {
+    // Reported a fourth time on the same Reddit post. The byline rule is gated on the page being
+    // recognised as a discussion, which needs comment furniture to be present; the duplicate-heading
+    // rule needs the document's declared title. A capture with neither satisfied neither, and the
+    // credit bar came back at the top of the body:
+    //
+    //   rss 커뮤니티로 이동  r/rss  13일 전  awesome5ftw  I'm very new to RSS and just started …
+    //
+    // What is true in both captures is the shape, so that is what the rule keys on now.
+    let reddit = "<html lang=\"ko\"><body><main dir=\"ltr\">\
+        <div><span>\
+          <span><a href=\"https://www.reddit.com/r/rss/\">rss 커뮤니티로 이동</a></span>\
+          <div><span><span><a href=\"https://www.reddit.com/r/rss/\">r/rss</a></span>\
+            <time datetime=\"2026-07-24T20:36:22.796Z\">13일 전</time></span>\
+          <div><span><div><a href=\"https://www.reddit.com/user/awesome5ftw/\">awesome5ftw</a>\
+            </div></span></div></div>\
+        </span></div>\
+        <h1 dir=\"auto\">New to RSS here, why can't i use this website to add to my feed?</h1>\
+        <div><div><div dir=\"auto\">\
+        <p>I'm very new to RSS and just started setting up apps (Feeder) I follow football closely \
+          and wanted to make a list, but I can't seem to add this website for some reason.</p>\
+        <p>This is the website.</p></div></div></div>\
+        </main></body></html>";
+    let (_, text, n) = extract(reddit);
+    assert_eq!(n, 0, "this capture has no comment furniture at all");
+    assert!(text.contains("very new to RSS"), "the body was lost: {text}");
+    for gone in ["커뮤니티로 이동", "13일 전", "awesome5ftw", "r/rss"] {
+        assert!(!text.contains(gone), "credit bar fragment {gone:?} survived: {text}");
+    }
+
+    // The discriminator is links, not the `<time>`: a news dateline looks the same at a glance and
+    // `expected.html` keeps it, so it must stay. It is plain text with at most a byline link, where
+    // a credit bar is links end to end.
+    let news = "<html><head><title>Markets close higher — Daily</title></head><body><main>\
+        <article>\
+        <div class=\"dateline\">By A Reporter <time datetime=\"2026-07-24T20:36:22Z\">24 July 2026\
+          </time></div>\
+        <h1>Markets close higher as industrials rally</h1>\
+        <p>Equities finished the session up across the board, with the broadest gains in \
+          industrials and a late rally in energy that carried the index past its opening level.</p>\
+        </article></main></body></html>";
+    let (_, news_text, _) = extract(news);
+    assert!(
+        news_text.contains("A Reporter") && news_text.contains("24 July 2026"),
+        "a news dateline was removed as a credit bar: {news_text}"
+    );
+}

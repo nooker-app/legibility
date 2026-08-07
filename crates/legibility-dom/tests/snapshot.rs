@@ -59,6 +59,7 @@ fn cases() -> Vec<(&'static str, String)> {
         ("geeknews-topic-two-comments", geeknews_topic(2)),
         ("timeline-events-are-not-comments", timeline_events()),
         ("nav-inside-main-is-not-body", nav_inside_main()),
+        ("reddit-credit-bar-without-comments", reddit_credit_bar_only()),
     ]
 }
 
@@ -427,6 +428,51 @@ fn nav_inside_main() -> String {
        <p>This change reuses a pooled datasource keyed by type and config, and closes it only when \
          the last borrower gives it back.</p></div>\
      <footer><a href=\"/terms\">Terms</a><a href=\"/privacy\">Privacy</a></footer>\
+     </main></body></html>"
+        .to_string()
+}
+
+/// The same Reddit post as [`reddit_text_post`], captured with **neither** of the two signals the
+/// credit-bar rule used to depend on.
+///
+/// Reported a fourth time, on `r/rss/comments/1v5n91g`, with the bar back at the top of the body:
+///
+/// ```text
+///   rss 커뮤니티로 이동  r/rss  13일 전  awesome5ftw  I'm very new to RSS and just started …
+/// ```
+///
+/// Both exclusions failed at once, which is what made it look like the earlier fix had been undone.
+/// The byline rule is gated on the page being recognised as a discussion, and this capture carries
+/// no comment furniture at all — a post with zero replies, saved from a rendered DOM — so `shape`
+/// came back `None` and the rule was unreachable. The duplicate-heading rule needs the document's
+/// declared title, and it did not match either, so the `<h1>` stayed too.
+///
+/// Neither signal is present here on purpose: no `<title>`, no comment tree, no custom elements —
+/// only the structure, which is the one thing that was true both times. A credit bar is a block
+/// holding a `<time>` whose text is almost entirely links; a news dateline is plain text with at
+/// most a byline link, and [`news_article_with_dateline`] pins that it survives.
+fn reddit_credit_bar_only() -> String {
+    "<html lang=\"ko\"><body>\
+     <main dir=\"ltr\">\
+     <div><span>\
+       <span><a href=\"https://www.reddit.com/r/rss/\">rss 커뮤니티로 이동</a></span>\
+       <div>\
+         <span><span><a href=\"https://www.reddit.com/r/rss/\">r/rss</a></span>\
+           <time datetime=\"2026-07-24T20:36:22.796Z\" title=\"2026년 7월 24일 금요일\">13일 전</time>\
+           </span>\
+         <div><span><div><a href=\"https://www.reddit.com/user/awesome5ftw/\">\
+           <span dir=\"auto\">awesome5ftw</span></a></div></span></div>\
+       </div>\
+     </span></div>\
+     <h1 dir=\"auto\">New to RSS here, why can't i use this website to add to my feed?</h1>\
+     <div><div><div dir=\"auto\">\
+     <p>I'm very new to RSS and just started setting up apps (Feeder) I follow football closely and \
+       wanted to make a list, but I can't seem to add this website for some reason. Any help would \
+       be great.</p>\
+     <p><a href=\"https://www.sport.es/es/\" rel=\"noopener nofollow ugc\">\
+       https://www.sport.es/es/</a></p>\
+     <p>This is the website.</p>\
+     </div></div></div>\
      </main></body></html>"
         .to_string()
 }

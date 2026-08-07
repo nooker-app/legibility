@@ -324,6 +324,19 @@ fn named_furniture(arena: &Arena, node: crate::NodeId) -> bool {
     !holds_authored_block(arena, node) && arena.link_density(node) > 0.5
 }
 
+/// Share of a credit bar's prose that sits inside links, above which it is not a dateline.
+///
+/// A news dateline is plain text with at most one byline link; a submission credit bar is a row of
+/// links with a timestamp among them. Measured on the corpus rather than chosen: see
+/// [`furniture_landmarks`].
+const CREDIT_BAR_LINK_SHARE: f32 = 0.5;
+
+/// Whether a subtree contains a `<time>`.
+fn has_time(arena: &Arena, node: crate::NodeId) -> bool {
+    let end = (arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    (node.idx()..end).any(|i| arena.tag.get(i).copied() == Some(crate::TagId::TIME))
+}
+
 /// Whether a subtree contains a form control — something that could actually be submitted.
 fn holds_control(arena: &Arena, node: crate::NodeId) -> bool {
     let end = (arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize).min(arena.len());
@@ -401,11 +414,32 @@ fn furniture_landmarks(arena: &Arena, region: crate::NodeId) -> alloc::vec::Vec<
         }
         let tag = arena.tag.get(i).copied().unwrap_or(crate::TagId::UNKNOWN);
         let is_element = arena.kind.get(i).copied() == Some(crate::NodeKind::Element);
+        let node = crate::NodeId(i as u32);
         if is_element && matches!(tag, crate::TagId::BLOCKQUOTE | crate::TagId::FIGURE) {
             quoting.push((arena.subtree_end.get(i).copied().unwrap_or(0) as usize).max(i + 1));
         }
         let semantic = match tag {
             crate::TagId::NAV => true,
+            // A credit bar: a block carrying a `<time>` whose text is almost all links.
+            //
+            // Every discussion site opens a submission with one — community, author, age, score —
+            // and it rides inside the article region. There is already a rule for it, but it is
+            // gated on the page being recognised as a discussion, which needs the comment section to
+            // be present and detected. A Reddit post captured with no comment furniture, or one
+            // whose `<title>` does not match its `<h1>`, satisfies neither gate, and the credit bar
+            // came back at the top of the body:
+            //
+            //   rss 커뮤니티로 이동  r/rss  13일 전  awesome5ftw  I'm very new to RSS and …
+            //
+            // What is true regardless of comments and of the title is the shape. A news dateline
+            // looks the same at a glance — `By A Reporter <time>24 July 2026</time>` — and must be
+            // kept, because `expected.html` keeps it. The two come apart on links: a credit bar is
+            // links almost end to end (community, author, permalink), a dateline is plain text with
+            // at most a byline link. That is the whole discriminator, and it needs nothing else
+            // about the page to be known.
+            _ if has_time(arena, node) && !holds_authored_block(arena, node) => {
+                arena.link_density(node) > CREDIT_BAR_LINK_SHARE
+            }
             crate::TagId::FOOTER => quoting.is_empty(),
             // A `<form>` is a wrapper as often as it is a toolbar. old.reddit.com puts every post
             // body *and* every comment body inside `<form class="usertext" action="#"
@@ -418,10 +452,10 @@ fn furniture_landmarks(arena: &Arena, region: crate::NodeId) -> alloc::vec::Vec<
             // none, and is a `<div>` wearing the wrong tag. Requiring "no authored paragraph"
             // instead was tried and cost `theverge` 0.906 → 0.880, because a signup box legitimately
             // carries one line of prose telling you what you are signing up for.
-            crate::TagId::FORM => holds_control(arena, crate::NodeId(i as u32)),
+            crate::TagId::FORM => holds_control(arena, node),
             _ => false,
         };
-        if is_element && (semantic || named_furniture(arena, crate::NodeId(i as u32))) {
+        if is_element && (semantic || named_furniture(arena, node)) {
             out.push(crate::NodeId(i as u32));
             removed = removed.saturating_add(arena.prose_len.get(i).copied().unwrap_or(0));
             // Skip the subtree: a `<nav>` inside an excluded `<aside>` adds nothing, and nested

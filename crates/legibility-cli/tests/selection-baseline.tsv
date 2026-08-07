@@ -19,7 +19,7 @@ blogger	0.9992
 breitbart	0.9845
 bug-1255978	0.0000
 buzzfeed-1	0.7349
-citylab-1	0.9774
+citylab-1	0.9875
 clean-links	0.9858
 cnet	0.9447
 cnet-svg-classes	0.9386
@@ -52,7 +52,7 @@ keep-images	0.9924
 keep-tabular-data	0.9792
 la-nacion	0.9896
 lazy-image-1	0.9924
-lazy-image-2	0.9871
+lazy-image-2	0.9872
 lazy-image-3	1.0000
 lemonde-1	0.9583
 liberation-1	0.8896
@@ -74,8 +74,8 @@ msn	1.0000
 normalize-spaces	1.0000
 nytimes-1	0.9956
 nytimes-2	0.8879
-nytimes-3	0.9520
-nytimes-4	0.8774
+nytimes-3	0.9532
+nytimes-4	0.8826
 nytimes-5	0.5009
 ol	1.0000
 parsely-metadata	1.0000
