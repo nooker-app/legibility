@@ -1121,3 +1121,46 @@ fn a_long_run_of_whitespace_merges_into_one_node() {
         arena.len()
     );
 }
+
+#[test]
+fn a_pointer_must_be_mostly_headline_and_link_or_it_is_an_article() {
+    // `cnet-svg-classes`. A news article with a Disqus section is correctly recognised as a
+    // discussion — it has comment furniture — but the first heading inside the chosen region belongs
+    // to the "related articles" box rather than to the article, so the submission title named the
+    // wrong node and nothing could out-mass it. The verdict was `LinkOnly`, and the serializer's
+    // answer to a pointer is an empty body: 1767 bytes of article deleted.
+    //
+    // The corpus could not see it. The ratchet scores the *region*, not the serialized output, so
+    // that page sat at 0.938 while returning `html: ""`.
+    let article = "<html><head><title>Twitter Lite llega a 11 países</title></head><body><main>\
+        <div id=\"content\">\
+        <div class=\"related\"><h3><a href=\"/es/noticias/otro/\">Artículos Relacionados</a></h3>\
+        <ul><li><a href=\"/es/a/\">Primer enlace relacionado con el tema</a></li>\
+        <li><a href=\"/es/b/\">Segundo enlace relacionado</a></li></ul></div>\
+        <p>Twitter ha dado a conocer que su versión ligera estará disponible en más países de \
+          América Latina durante las próximas semanas.</p>\
+        <p>La aplicación pesa menos de un megabyte y está pensada para conexiones lentas, algo \
+          común en varios de los mercados donde se lanza.</p>\
+        <p>La compañía no ha detallado si el resto de la región recibirá la aplicación este año.</p>\
+        </div>\
+        <div class=\"comments collapsible\"><div class=\"commentsContainer disqusContainer\">\
+          </div></div>\
+        </main></body></html>";
+    let (kind, _, text) = extract_shape(article);
+    assert_eq!(kind, "article", "an article with a Disqus box was served as a pointer");
+    assert!(text.contains("menos de un megabyte"), "the body was emptied: {text:?}");
+
+    // And the guard must not cost a genuine pointer its shape: past the headline and the
+    // destination, a link submission has a credit bar and nothing else.
+    let pointer = shreddit_post(
+        "<div class=\"md\"><p>[<a href=\"https://github.com/free-news-api/news-api\">\
+         https://github.com/free-news-api/news-api</a>]</p></div>",
+        "<section><p>Be the first to comment</p>\
+         <p>Nobody's responded to this post yet. Add your thoughts and get the conversation \
+         going, because this block is longer and denser than the submission itself.</p></section>",
+    );
+    let (kind, url, text) = extract_shape(&pointer);
+    assert_eq!(kind, "discussion-root", "a pointer must not be served as an article");
+    assert_eq!(url, "https://github.com/free-news-api/news-api");
+    assert_eq!(text, "", "a pointer must have an empty body, got: {text}");
+}

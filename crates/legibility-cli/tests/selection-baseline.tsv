@@ -8,7 +8,7 @@
 aclu	0.9992
 aktualne	0.9234
 archive-of-our-own	1.0000
-ars-1	0.9841
+ars-1	0.9888
 article-author-tag	0.9869
 base-url	1.0000
 base-url-base-element	1.0000
@@ -36,7 +36,7 @@ embedded-videos	0.9964
 engadget	0.9421
 firefox-nightly-blog	0.9192
 folha	0.9604
-gitlab-blog	0.9179
+gitlab-blog	0.9194
 gmw	1.0000
 google-sre-book-1	0.9937
 guardian-1	1.0000
@@ -44,7 +44,7 @@ heise	0.9961
 herald-sun-1	0.8470
 hidden-nodes	0.0000
 hukumusume	0.5410
-iab-1	0.9984
+iab-1	1.0000
 ietf-1	0.9870
 invalid-attributes	1.0000
 js-link-replacement	0.0000
@@ -52,7 +52,7 @@ keep-images	0.9924
 keep-tabular-data	0.9792
 la-nacion	0.9896
 lazy-image-1	0.9924
-lazy-image-2	0.9872
+lazy-image-2	0.9879
 lazy-image-3	1.0000
 lemonde-1	0.9583
 liberation-1	0.8896
@@ -89,7 +89,7 @@ remove-script-tags	0.9922
 reordering-paragraphs	1.0000
 replace-brs	0.9922
 replace-font-tags	1.0000
-royal-road	0.9787
+royal-road	0.9998
 rtl-1	1.0000
 rtl-2	1.0000
 rtl-3	1.0000
@@ -119,10 +119,10 @@ wapo-1	0.9244
 wapo-2	0.9764
 webmd-1	0.9836
 webmd-2	0.9783
-wikia	0.9665
-wikipedia	0.9442
-wikipedia-2	0.9465
-wikipedia-3	0.1126
+wikia	0.9695
+wikipedia	0.9447
+wikipedia-2	0.9496
+wikipedia-3	0.9380
 wikipedia-4	0.9801
 wordpress	0.2626
 yahoo-1	1.0000

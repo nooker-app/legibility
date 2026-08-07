@@ -224,7 +224,42 @@ pub fn decide(
     // heading sits alone in a header block reports a pointer with no destination, and the
     // serializer's answer to a pointer is an empty body -- so a misjudgement here does not
     // degrade the article, it deletes it. A pointer that points nowhere is not a pointer.
-    if qualified.is_some() || link.is_none() {
+    // The other half of that argument, and the one that was missing. A pointer is a headline and a
+    // destination: past those two there is a credit bar and very little else. So if the region still
+    // holds more prose than its own headline once both are accounted for, it is not a pointer,
+    // whatever the body search concluded.
+    //
+    // `cnet-svg-classes` is the case. It is a news article with a Disqus section, so it is correctly
+    // recognised as a discussion; but the first heading inside the chosen region belongs to the
+    // "Artículos Relacionados" box, not to the article, so `title` named the wrong node and no child
+    // could out-mass it. The verdict was `LinkOnly`, and the serializer's answer to a pointer is an
+    // empty body — 1767 bytes of article deleted, `html: ""`, `text: ""`.
+    //
+    // Compared against the headline rather than a byte constant, for the same reason `body_prose >
+    // title_prose` is: it is a comparison with something else on the same page, so it does not
+    // assume a size.
+    // Net of the exclusions, exactly as the serializer computes `prose_len`. A link submission's
+    // region contains its comment section — "Be the first to comment" and the composer run to a few
+    // hundred bytes, more than the submission itself — and counting those as leftover made every
+    // genuine pointer look like an article.
+    let region_end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
+    let excluded: u32 = exclusions
+        .iter()
+        .filter(|e| e.idx() > region.idx() && e.idx() < region_end)
+        .map(|e| arena.prose_len.get(e.idx()).copied().unwrap_or(0))
+        .sum();
+    let link_prose = link.map_or(0, |l| arena.prose_len.get(l.idx()).copied().unwrap_or(0));
+    let leftover = arena
+        .prose_len
+        .get(region.idx())
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(excluded)
+        .saturating_sub(title_prose)
+        .saturating_sub(link_prose);
+    let is_pointer = link.is_some() && leftover <= title_prose;
+
+    if qualified.is_some() || !is_pointer {
         Some(Shape { kind: DiscussionShape::WithBody, title, body: qualified, link, byline })
     } else {
         Some(Shape { kind: DiscussionShape::LinkOnly, title, body: None, link, byline })

@@ -250,6 +250,41 @@ fn no_page_falls_below_its_committed_baseline() {
     );
 }
 
+/// No corpus page may come back as a link submission with an empty body.
+///
+/// The ratchet above scores `prose_text_excluding` on the *region*, and never asks the serializer.
+/// So a page whose region is full of prose but whose serialized output is `html: ""` scores exactly
+/// as well as one that works — `cnet-svg-classes` sat at 0.9386 while returning nothing at all,
+/// through every run of this file, because the metric could not see it.
+///
+/// None of the 130 pages is a link submission: they are articles, and Reddit and Hacker News are not
+/// in this corpus. So `discussion-root` here is always wrong, and it is the one outcome that empties
+/// the body — which makes this the cheapest possible cover for the blind spot.
+#[test]
+fn no_corpus_page_is_served_as_a_pointer() {
+    let pages = corpus();
+    if pages.is_empty() {
+        eprintln!("corpus submodule absent; skipping");
+        return;
+    }
+    let mut pointers: Vec<String> = Vec::new();
+    for d in pages {
+        let Ok(src) = std::fs::read(d.join("source.html")) else { continue };
+        let html = String::from_utf8_lossy(&src).into_owned();
+        let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+        let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+        let is_pointer =
+            out.shape.is_some_and(|sh| sh.kind == legibility_core::DiscussionShape::LinkOnly);
+        if is_pointer {
+            pointers.push(d.file_name().unwrap_or_default().to_string_lossy().into_owned());
+        }
+    }
+    assert!(
+        pointers.is_empty(),
+        "these pages were served as link submissions, so their bodies came back empty: {pointers:?}"
+    );
+}
+
 #[test]
 #[ignore = "writes the baseline; run deliberately after reviewing what changed"]
 fn bless_baseline() {
