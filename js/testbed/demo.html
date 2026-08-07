@@ -426,10 +426,18 @@ const SAMPLE = `<!doctype html><html lang="ko"><head>
 $("go").onclick = run;
 $("sample").onclick = () => { $("html").value = SAMPLE; run(); };
 
-// URL input. The fetch happens in `lgb serve` -- a process on this machine -- because a browser
-// cannot fetch a third-party site from a page it did not come from, whatever the protocol. That
-// keeps the promise the single-file build actually makes: nothing but your own device is involved.
-// A public CORS proxy would work and is exactly what must not be used here.
+// Where the *helper* lives, when there is one. Served over http(s) by `lgb serve` it is the same
+// origin; opened from `file://` it is a port on loopback.
+//
+// A browser will not hand a page the response from another origin unless that origin allows it, so
+// something outside the browser has to do the fetching. On this machine that is `lgb serve`, and
+// nothing but your own device is involved — which is the promise the offline build makes and keeps.
+//
+// This comment used to end "a public CORS proxy would work and is exactly what must not be used
+// here". That is no longer true and the code below it now says so: on a *static deploy* there is no
+// helper to reach and the choice is a third party or nothing, so `fetchWithoutHelper` takes the
+// third party and names it on the page. The rule survives where it still applies — this function's
+// path never touches one.
 function helperBase() {
   if (location.protocol === "http:" || location.protocol === "https:") return "";
   const port = Number($("port").value) || 8899;
