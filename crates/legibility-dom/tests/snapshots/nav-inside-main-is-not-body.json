@@ -2,14 +2,14 @@
   "schema_version":1,
   "url":null,
   "article":{
-    "html":"<article><p>This release closes the long-standing report about revision ordering, and changes the default for two configuration keys that almost nobody had set deliberately.</p><p>Upgrading in place is supported from any 6.x release. The repository format is unchanged, so a downgrade remains possible for as long as no new revisions land.</p></article>",
-    "text":"This release closes the long-standing report about revision ordering, and changes the default for two configuration keys that almost nobody had set deliberately. Upgrading in place is supported from any 6.x release. The repository format is unchanged, so a downgrade remains possible for as long as no new revisions land.",
-    "tag":"article",
+    "html":"<main><div><p>queryDatabase builds a datasource and closes it again on every sync, which costs a full connection handshake per source per interval.</p><p>This change reuses a pooled datasource keyed by type and config, and closes it only when the last borrower gives it back.</p></div></main>",
+    "text":"queryDatabase builds a datasource and closes it again on every sync, which costs a full connection handshake per source per interval. This change reuses a pooled datasource keyed by type and config, and closes it only when the last borrower gives it back.",
+    "tag":"main",
     "kind":"article",
     "url":null,
-    "prose_len":320,
-    "confidence":8486,
-    "dropped_subtrees":1,
+    "prose_len":254,
+    "confidence":8700,
+    "dropped_subtrees":4,
     "unwrapped":0,
     "truncated":false,
     "dispersion_floor":false,
@@ -36,12 +36,12 @@
   },
   "metadata":{
     "title":{
-      "value":"Release notes for version 6.9",
-      "source":"h1",
-      "confidence":60,
+      "value":"Reuse datasource connections · Pull Request #39",
+      "source":"title-tag",
+      "confidence":50,
       "span":[
-        41,
-        70
+        0,
+        48
       ],
       "transforms":[
         "EntityDecodedByParser"
@@ -58,18 +58,18 @@
     ],
     "published":null,
     "modified":null,
-    "candidate_count":2
+    "candidate_count":1
   },
   "page_kind":"article-or-discussion",
   "comment_mask_reverted":false,
-  "group_count":1,
+  "group_count":2,
   "diagnostics":{
-    "node_count":31,
-    "page_prose_len":444,
+    "node_count":48,
+    "page_prose_len":372,
     "page_control_len":0,
     "page_hidden_len":0,
     "page_alt_len":0,
-    "page_inert_len":41,
+    "page_inert_len":48,
     "discussion_shape":null,
     "limits_hit":[
       

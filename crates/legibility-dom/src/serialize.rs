@@ -102,6 +102,23 @@ pub fn serialize_region_excluding<P: Profile>(
     while let Some(step) = stack.pop() {
         if out.len() as u32 >= opts.max_output_bytes {
             report.truncated = true;
+            // Close what is still open before leaving, innermost first — the stack already holds the
+            // pending `Close` steps in exactly that order. Breaking outright dropped the step just
+            // popped and abandoned the rest, so a truncated article ended mid-element with no
+            // `</div>`, `</article>` or `</p>`: the fragment did not reparse to the tree it was a
+            // prefix of, and a consumer inserting it into a page would have its own markup adopted
+            // into the hole.
+            //
+            // These closes may carry the output a few bytes past the cap. That is the right trade:
+            // the cap exists to bound memory, and well-formedness is what the bytes are *for*.
+            let mut pending = Some(step);
+            while let Some(s) = pending.take().or_else(|| stack.pop()) {
+                if let Step::Close(t) = s {
+                    out.push_str("</");
+                    out.push_str(t);
+                    out.push('>');
+                }
+            }
             break;
         }
         match step {
@@ -163,7 +180,7 @@ pub fn serialize_region_excluding<P: Profile>(
                             report.dropped_subtrees = report.dropped_subtrees.saturating_add(1);
                             continue;
                         }
-                        if !name.is_empty() && legibility_sanitize::drops_subtree(name) {
+                        if !name.is_empty() && legibility_sanitize::drops_subtree_for::<P>(name) {
                             report.dropped_subtrees = report.dropped_subtrees.saturating_add(1);
                             continue;
                         }
@@ -313,9 +330,58 @@ const MAX_COLLAPSE_PASSES: usize = 32;
 /// only whitespace that separates two inline elements on one line is a plain space, and collapsing
 /// that could weld two words together. Anything spanning a newline is pretty-printer output, which
 /// HTML itself already renders as a single space.
+///
+/// # Except inside `<pre>`
+///
+/// There the whitespace *is* the content. Running this over a code block reindents every line to
+/// column zero and deletes the blank lines between functions:
+///
+/// ```text
+///   def f(n):            def f(n):
+///       if n < 2:   ->   if n < 2:
+///           return n     return n
+/// ```
+///
+/// which is not a formatting nit — it is the difference between runnable Python and not. `<pre>` is
+/// already [`crate::TagId::is_opaque`] to cleaning for the same reason; it was not opaque here.
 fn collapse_blank_runs(out: &mut String) {
     let mut result = String::with_capacity(out.len());
     let mut rest: &str = out;
+    loop {
+        // Copy verbatim up to the next `<pre`, collapse that stretch, then hand the `<pre>` element
+        // through untouched. Nesting is counted rather than assumed: `<pre>` cannot legally contain
+        // another, but the serializer must not depend on the page being legal.
+        let cut = rest.find("<pre").unwrap_or(rest.len());
+        let (before, after) = rest.split_at(cut);
+        collapse_into(&mut result, before);
+        if after.is_empty() {
+            break;
+        }
+        let mut depth = 0usize;
+        let mut at = 0usize;
+        let end = loop {
+            let Some(next) = after[at..].find('<') else { break after.len() };
+            let i = at + next;
+            if after[i..].starts_with("<pre") {
+                depth += 1;
+            } else if after[i..].starts_with("</pre") {
+                depth -= 1;
+                if depth == 0 {
+                    // Include the close tag itself.
+                    break after[i..].find('>').map_or(after.len(), |g| i + g + 1);
+                }
+            }
+            at = i + 1;
+        };
+        result.push_str(&after[..end]);
+        rest = &after[end..];
+    }
+    *out = result;
+}
+
+/// Collapse every newline-spanning whitespace run in `chunk` into a single newline.
+fn collapse_into(result: &mut String, chunk: &str) {
+    let mut rest = chunk;
     while let Some(pos) = rest.find('\n') {
         // Back up over the whitespace preceding the newline, forward over what follows it.
         let start = rest[..pos].trim_end_matches([' ', '\t', '\r']).len();
@@ -325,7 +391,6 @@ fn collapse_blank_runs(out: &mut String) {
         rest = tail.trim_start_matches([' ', '\t', '\r', '\n']);
     }
     result.push_str(rest);
-    *out = result;
 }
 
 /// Direct children of `i` within `[i+1, end)`.

@@ -278,8 +278,31 @@ const ANCHOR_MIN_PROSE_SHARE: f32 = 0.20;
 
 /// Whether an element declares itself the article region.
 ///
-/// `<main>`/`<article>` by tag, or the ARIA equivalents. `role="document"` is included because
-/// reader-oriented pages use it for the same purpose.
+/// `<main>`/`<article>` by tag, the ARIA equivalents, or microdata's `itemprop="articleBody"`.
+/// `role="document"` is included because reader-oriented pages use it for the same purpose.
+///
+/// # Why `itemprop="articleBody"` belongs here
+///
+/// Plan §1.10.4 lists it and it was missed, which cost the whole family of `GeekNews` topic pages.
+/// They wrap everything in one `<article>` — the vote arrows, the credit bar, the body, the related
+/// links and the comments — and mark the body alone:
+///
+/// ```text
+///   <article>
+///     <div class="topicinfo">1P by GN⁺ 20시간전 | ★ favorite | 댓글 1개</div>
+///     <section itemprop="articleBody">…the actual post…</section>
+///     <div class="related-topics">…</div>
+///     <div id="comment_thread">…</div>
+///   </article>
+/// ```
+///
+/// `<article>` is a true anchor and the wrong one; it is *also* the widest viable candidate, so no
+/// statistic rescues it. Every extraction of these pages opened with `(warp.dev) 1 P by GN⁺` and
+/// ran on into the comments. It is the narrower claim that is worth having, and this is the only
+/// attribute on the page that makes it.
+///
+/// Of the two microdata spellings only `articleBody` is admitted. `itemprop="description"` and
+/// friends name *fields*, and treating a field as a region is how a meta line becomes an article.
 fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
     if arena
         .tag
@@ -287,6 +310,16 @@ fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
         .copied()
         .unwrap_or(TagId::UNKNOWN)
         .is_positive_landmark()
+    {
+        return true;
+    }
+    if arena
+        .attr(node, crate::arena::AttrName::ITEMPROP)
+        .is_some_and(|p| {
+            // Space-separated token list, per the microdata spec, so `contains` would match
+            // `articleBodyish` and a plain equality test would miss `itemprop="name articleBody"`.
+            p.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("articlebody"))
+        })
     {
         return true;
     }

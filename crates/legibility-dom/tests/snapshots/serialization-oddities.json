@@ -1,5 +1,6 @@
 {
   "schema_version":1,
+  "url":null,
   "article":{
     "html":"<article>\n<p>The first paragraph, which is <em>emphasised</em> in the middle and must not come out as <b>onewordwelded</b> either side of it.</p>\n<p>A second paragraph, far enough from the first that a naive collapse would join them into a single run of text with no break at all between the two.</p>\n<p>Inside a custom element, which is not a tag any consumer knows, so the wrapper goes and the paragraph stays.</p><table><tbody><tr><td><img src=\"/img/diagram.png\" alt=\"A diagram of the pipeline\"></td><td></td></tr></tbody></table><p>A link with <a>a scheme that is refused</a> and one with <a href=\"https://example.test/ok\">a scheme that is not</a>.</p></article>",
     "text":"The first paragraph, which is emphasised in the middle and must not come out as onewordwelded either side of it. A second paragraph, far enough from the first that a naive collapse would join them into a single run of text with no break at all between the two. Inside a custom element, which is not a tag any consumer knows, so the wrapper goes and the paragraph stays. A link with a scheme that is refused and one with a scheme that is not .",
@@ -16,6 +17,7 @@
     "signal_conflict":false,
     "calibrated":false
   },
+  "no_article":null,
   "comments":{
     "count":0,
     "depth_source":null,
@@ -62,7 +64,7 @@
   "comment_mask_reverted":false,
   "group_count":0,
   "diagnostics":{
-    "node_count":45,
+    "node_count":40,
     "page_prose_len":460,
     "page_control_len":0,
     "page_hidden_len":0,

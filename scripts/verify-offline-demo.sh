@@ -14,11 +14,10 @@ fail=0
 echo "offline demo verification"
 
 # 1. No loadable external reference. Prose may mention a URL; a src/href/import may not fetch one.
-ext=$(grep -oE '(src|href)="https?://[^"]*"|@import[^;]*|importScripts\(' "$FILE" | head -5)
-if [ -n "$ext" ]; then
-  printf '  FAIL  external references present:\n%s\n' "$ext"; fail=1
+if python3 scripts/check-external-refs.py "$FILE"; then
+  printf '  PASS  nothing loads from another host\n'
 else
-  printf '  PASS  no external src/href/import\n'
+  printf '  FAIL  off-host loads present, listed above\n'; fail=1
 fi
 
 # 2. The module is embedded, not referenced. Checked in Python, not grep: the base64 payload is one

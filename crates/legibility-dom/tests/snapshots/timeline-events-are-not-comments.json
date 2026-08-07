@@ -1,0 +1,95 @@
+{
+  "schema_version":1,
+  "url":null,
+  "article":{
+    "html":"<main><div><p>queryDatabase builds a datasource and closes it again on every sync, which costs a connection handshake per source per interval.</p><p>This reuses a pooled datasource keyed by type and config, and closes it when the last borrower returns it.</p></div><div><div><a href=\"/selenehyun\">selenehyun</a> <span>and others</span> added 3 commits <a href=\"#commits-pushed-8918818\"><time datetime=\"2026-08-05T12:40:50+09:00\">August 5, 2026</time></a><div><pre><code>8918818</code></pre><a href=\"/commit/8918818\">perf(lynqhub): reuse datasource connections across syncs</a></div></div><div><a href=\"/selenehyun\">selenehyun</a> <span>and others</span> added 2 commits <a href=\"#commits-pushed-8b85ec7\"><time datetime=\"2026-08-05T12:41:50+09:00\">August 5, 2026</time></a><div><pre><code>8b85ec7</code></pre><a href=\"/commit/8b85ec7\">perf(lynqhub): reuse datasource connections across syncs</a></div></div><div><a href=\"/selenehyun\">selenehyun</a> mentioned this pull request <a href=\"#ref-1\"><time datetime=\"2026-08-05T07:09:53Z\">Aug 5, 2026</time></a><div><a href=\"/pull/41\">fix(lynqhub): decide rollout skew on API state</a><span>#41</span><span>Merged</span></div></div></div></main>",
+    "text":"queryDatabase builds a datasource and closes it again on every sync, which costs a connection handshake per source per interval. This reuses a pooled datasource keyed by type and config, and closes it when the last borrower returns it. selenehyun and others added 3 commits August 5, 2026 8918818 perf(lynqhub): reuse datasource connections across syncs selenehyun and others added 2 commits August 5, 2026 8b85ec7 perf(lynqhub): reuse datasource connections across syncs selenehyun mentioned this pull request Aug 5, 2026 fix(lynqhub): decide rollout skew on API state #41 Merged",
+    "tag":"main",
+    "kind":"article",
+    "url":null,
+    "prose_len":567,
+    "confidence":7470,
+    "dropped_subtrees":1,
+    "unwrapped":0,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "no_article":null,
+  "comments":{
+    "count":0,
+    "depth_source":null,
+    "completeness":{
+      "present":0,
+      "claimed_total":null,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"perf(hub): reuse datasource connections",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        85,
+        124
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":null,
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":{
+      "candidate":{
+        "value":"2026-08-05T12:40:50+09:00",
+        "source":"time-element",
+        "confidence":75,
+        "span":[
+          457,
+          482
+        ],
+        "transforms":[
+          "EntityDecodedByParser"
+        ],
+        "verbatim_ok":true
+      },
+      "raw":"2026-08-05T12:40:50+09:00",
+      "iso8601":"2026-08-05T12:40:50+09:00",
+      "tz_known":true
+    },
+    "modified":null,
+    "candidate_count":5
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":1,
+  "diagnostics":{
+    "node_count":61,
+    "page_prose_len":606,
+    "page_control_len":0,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":73,
+    "discussion_shape":null,
+    "limits_hit":[
+      
+    ]
+  }
+}

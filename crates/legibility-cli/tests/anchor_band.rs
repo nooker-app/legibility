@@ -65,9 +65,19 @@ const PER_PAGE_TOLERANCE: f32 = 0.02;
 /// `bug-1255978` is the one refusal: it now returns `IndexPage` rather than a low-scoring
 /// region. One page in 130 is 0.8%, well under the 5% `refusal_rate` cap, but it is a refusal
 /// and not a near miss, so it is named here.
+/// `nytimes-3` joined for a different reason: `itemprop="articleBody"` became a semantic anchor
+/// (plan §1.10.4, listed there from the start and never implemented). That is the narrowest claim a
+/// page can make about where its body is, and honouring it moved **24 pages up and 3 down, mean F1
+/// 0.8374 → 0.8432** — folha +0.162, heise +0.124, liberation-1 +0.100, medicalnewstoday +0.090.
+///
+/// The NYT puts its dek in a `<p>` *outside* the marked body, so choosing the narrower region drops
+/// one sentence that `expected.html` keeps: 0.988 → 0.952. Region growth (plan M6) is the real fix —
+/// the marked body plus its adjacent dek — and until that exists this is a sentence lost against
+/// four sites' worth of credit bars and comment threads removed. Named rather than absorbed.
 #[allow(dead_code)]
-const KNOWN_REGRESSIONS: [&str; 6] = [
+const KNOWN_REGRESSIONS: [&str; 7] = [
     "bug-1255978",
+    "nytimes-3",
     "ehow-1",
     "hukumusume",
     "quanta-1",

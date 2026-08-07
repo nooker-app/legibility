@@ -148,7 +148,7 @@ pub extern "C" fn lgb_schema_version() -> u32 {
 fn run(html: &str, limits: Limits) -> String {
     let (arena, hit) = legibility_dom::BuildArena::parse_to_arena(html, limits);
     let out = legibility_core::extract_all(&arena, limits);
-    legibility_dom::json::extraction_json(&arena, &out, hit, None)
+    legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, limits)
 }
 
 /// Extract from a `&str`, for native tests of the same path the browser takes.
@@ -183,7 +183,8 @@ mod tests {
         let (arena, hit) =
             legibility_dom::BuildArena::parse_to_arena(html, Limits::BROWSER);
         let out = legibility_core::extract_all(&arena, Limits::BROWSER);
-        let direct = legibility_dom::json::extraction_json(&arena, &out, hit, None);
+        let direct =
+            legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, Limits::BROWSER);
         assert_eq!(extract_to_json(html), direct);
     }
 }

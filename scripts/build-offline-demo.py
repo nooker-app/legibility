@@ -91,13 +91,15 @@ def main() -> int:
     print(f"  wrote {shown}  ({size // 1024} KB, single file, no server)")
     # Anything the page loads from the network would break the offline promise, so check rather
     # than trust: no src/href pointing outward, no import, no fetch of a URL.
-    lowered = html.lower()
-    for bad in ["http://", "https://cdn", "src=\"http", "href=\"http", "integrity="]:
-        if bad in lowered:
-            # Links in prose are fine; only loadable references matter.
-            if bad in ("http://", "https://cdn") and "script src" not in lowered:
-                continue
-            print(f"  WARNING: found {bad!r} — the page may not be fully offline")
+    # One implementation of "would this load from off-host", shared with pages-guard.sh and
+    # verify-offline-demo.sh. The substring sweep this replaces warned on the repo link in the
+    # header -- an `<a href>` fetches nothing until clicked -- and a guard that cries wolf gets
+    # ignored, which is worse than not having one.
+    if subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check-external-refs.py"), str(out_path)],
+        check=False,
+    ).returncode != 0:
+        print("  WARNING: the page would load something from another host (listed above)")
     return 0
 
 

@@ -1,5 +1,6 @@
 {
   "schema_version":1,
+  "url":null,
   "article":{
     "html":"",
     "text":"",
@@ -16,6 +17,7 @@
     "signal_conflict":false,
     "calibrated":false
   },
+  "no_article":null,
   "comments":{
     "count":0,
     "depth_source":null,

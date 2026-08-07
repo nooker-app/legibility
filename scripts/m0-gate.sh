@@ -28,15 +28,47 @@ chk "corpus submodule pinned to expected SHA"    "[ \"\$(git -C corpus/readabili
 chk "tier_a case count matches manifest"         "[ \"\$(ls corpus/readability/test/test-pages | wc -l | tr -d ' ')\" = 130 ]"
 
 # Byte-identical output across targets is the load-bearing S3 gate.
-H=/tmp/m0-gate-fixture.html
-printf '<html><body><nav><a href=#>n</a></nav><article><p>alpha beta gamma</p></article></body></html>' > "$H"
-NAT=$(cargo run -q -p legibility-cli -- extract "$H" | shasum -a 256 | cut -d' ' -f1)
+#
+# It used to be one hand-written fixture, and that fixture was a single line -- the one shape of
+# document that *cannot* diverge. Meanwhile the real answer was that native and wasm32 disagreed on
+# **123 of the 130 corpus pages**, down to different headlines and lost bylines, because html5ever
+# chunks text differently per target and the sink turned chunking into arena shape. A gate that tests
+# the only safe input is not a gate.
+#
+# So: every corpus page, both targets, compared byte for byte. It costs about a minute and it is the
+# only thing standing between S3 and another silent divergence.
+cargo build -q --release -p legibility-cli
 cargo build -q --release -p legibility-cli --target wasm32-wasip1
-WAS=$(wasmtime run --dir=/tmp target/wasm32-wasip1/release/lgb.wasm extract "$H" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
-if [ -n "$NAT" ] && [ "$NAT" = "$WAS" ]; then
-  printf '  PASS  native == wasip1 byte-identical output (S3)\n'
+S3TMP=$(mktemp -d); trap 'rm -rf "$S3TMP"' EXIT
+mismatch=0; compared=0
+for d in corpus/readability/test/test-pages/*/; do
+  [ -f "$d/source.html" ] || continue
+  cp "$d/source.html" "$S3TMP/src.html"
+  n=$(./target/release/lgb extract "$S3TMP/src.html" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  w=$(wasmtime run --dir="$S3TMP" target/wasm32-wasip1/release/lgb.wasm extract "$S3TMP/src.html" \
+        2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  compared=$((compared + 1))
+  if [ -z "$n" ] || [ "$n" != "$w" ]; then
+    mismatch=$((mismatch + 1))
+    [ "$mismatch" -le 5 ] && printf '        %s: native %s != wasip1 %s\n' \
+      "$(basename "$d")" "${n:0:12}" "${w:0:12}"
+  fi
+done
+# A newline *inside* a text run is the shape that used to diverge; keep one explicitly so the check
+# still means something if the corpus submodule is ever absent.
+printf '<html><body><nav><a href=#>n</a></nav><article><p>alpha beta\ngamma</p></article></body></html>' \
+  > "$S3TMP/nl.html"
+n=$(./target/release/lgb extract "$S3TMP/nl.html" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+w=$(wasmtime run --dir="$S3TMP" target/wasm32-wasip1/release/lgb.wasm extract "$S3TMP/nl.html" \
+      2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+compared=$((compared + 1))
+[ -n "$n" ] && [ "$n" = "$w" ] || { mismatch=$((mismatch + 1)); printf '        newline-in-text fixture diverges\n'; }
+
+if [ "$mismatch" = 0 ] && [ "$compared" -gt 1 ]; then
+  printf '  PASS  native == wasip1 on all %s inputs (S3)\n' "$compared"
 else
-  printf '  FAIL  native(%s) != wasip1(%s)\n' "${NAT:0:12}" "${WAS:0:12}"; fail=1
+  printf '  FAIL  %s of %s inputs differ between native and wasip1 (S3)\n' "$mismatch" "$compared"
+  fail=1
 fi
 
 echo

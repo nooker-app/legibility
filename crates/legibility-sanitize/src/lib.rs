@@ -122,9 +122,26 @@ const ALLOWED: &[&str] = &[
 /// Elements whose entire subtree is discarded, text included.
 ///
 /// Distinct from "not allowed": an unknown `<foo>` should keep its text, but a `<script>`'s
-/// contents are code and a `<form>`'s are controls.
+/// contents are code.
+///
+/// # Why `<form>` is not here
+///
+/// It was, on the reasoning that a form's contents are controls. Sites use `<form>` as a *layout
+/// wrapper* around prose, and old.reddit.com is the case that proves it: both a self-post's text and
+/// every comment's text live inside
+///
+/// ```text
+///   <form class="usertext" action="#" onsubmit="return false;">
+///     <div class="usertext-body"><div class="md"><p>…the actual text…</p></div></div>
+///   </form>
+/// ```
+///
+/// so dropping the subtree emptied every comment body on the site. A `<form>` is dangerous because
+/// it *submits*, and unwrapping it removes that completely — the element vanishes, its text stays,
+/// and the controls inside it are still dropped individually by the entries below. Nothing is gained
+/// by taking the prose with them.
 const DROP_SUBTREE: &[&str] = &[
-    "script", "style", "noscript", "template", "iframe", "embed", "object", "applet", "form",
+    "script", "style", "noscript", "template", "iframe", "embed", "object", "applet",
     "input", "button", "select", "textarea", "option", "optgroup", "label", "fieldset", "legend",
     "svg", "math", "canvas", "map", "area", "audio", "video", "source", "track", "dialog",
     "meta", "link", "base", "title", "head",
@@ -207,6 +224,17 @@ pub fn check_url(raw: &str) -> UrlField {
 #[must_use]
 pub fn drops_subtree(tag: &str) -> bool {
     DROP_SUBTREE.contains(&tag)
+}
+
+/// [`drops_subtree`], plus the elements a *profile* refuses.
+///
+/// `UserContent` turns images off (plan §1.8), and that was implemented by refusing every attribute
+/// on `<img>` — which emitted `<img>` with no `src` and no `alt`: a broken-image icon in the reader,
+/// and the alt text, the one part that carries meaning, gone. Refusing the element is what "images
+/// off" was supposed to mean.
+#[must_use]
+pub fn drops_subtree_for<P: Profile>(tag: &str) -> bool {
+    drops_subtree(tag) || (!P::IMAGES && matches!(tag, "img" | "picture" | "source"))
 }
 
 /// Whether `tag` may appear in output.
@@ -427,14 +455,19 @@ mod tests {
     }
 
     #[test]
-    fn script_and_form_subtrees_are_dropped_but_unknown_elements_are_not() {
-        for t in ["script", "style", "iframe", "svg", "form", "button", "template", "dialog"] {
+    fn code_and_control_subtrees_are_dropped_but_wrappers_keep_their_text() {
+        for t in ["script", "style", "iframe", "svg", "button", "textarea", "template", "dialog"] {
             assert!(drops_subtree(t), "{t} subtree must be dropped");
         }
         // An unknown element should lose its tag but keep its text; dropping the subtree would
         // lose real content on any page using custom elements.
         assert!(!drops_subtree("my-widget"));
         assert!(!is_allowed_element("my-widget"));
+        // `<form>` is unwrapped rather than dropped, and it is not a permitted output element
+        // either: old.reddit.com wraps every post and comment body in one, so dropping the subtree
+        // emptied them. See DROP_SUBTREE's doc comment.
+        assert!(!drops_subtree("form"), "a form is a wrapper; its prose must survive");
+        assert!(!is_allowed_element("form"), "a form must not reach the output");
     }
 
     #[test]

@@ -45,9 +45,25 @@
   ol.comments li { border-left: 2px solid var(--line); padding: .35rem 0 .35rem .7rem; margin: .3rem 0; }
   .cmeta { color: var(--dim); font-size: .74rem; }
   .warn { color: #b80; }
+  /* Comment bodies are real markup now, so they need the same typographic care as the article:
+     without this a nested list renders flush left and a quote is indistinguishable from prose. */
+  .cbody :is(p, ul, ol, pre, blockquote) { margin: .4rem 0; }
+  .cbody :is(ul, ol) { padding-left: 1.2rem; }
+  .cbody blockquote { border-left: 3px solid var(--dim); padding-left: .7rem; opacity: .85; }
+  .cbody pre { overflow-x: auto; }
+  .cbody :is(h1, h2, h3, h4, h5, h6) { font-size: .9rem; margin: .5rem 0 .2rem; }
+  /* Repository link. An anchor and not a button: it is a navigation, so it should be
+     middle-clickable and copyable like any other link. */
+  .repo { float: right; font-size: .9rem; text-decoration: none; opacity: .75; }
+  .repo:hover { opacity: 1; }
+  .repo svg { width: 1.35rem; height: 1.35rem; vertical-align: -.25rem; fill: currentColor; }
 </style>
 
 <header>
+  <a class="repo" href="https://github.com/nooker-app/legibility" target="_blank"
+     rel="noopener noreferrer" aria-label="legibility on GitHub" title="Source on GitHub">
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+  </a>
   <h1>legibility <span class="pill" id="stage">loading…</span></h1>
   <p class="note">Extraction runs <strong>in this page</strong>, as WebAssembly — the same module
     whichever way you opened it, so results are identical. Paste HTML, choose a file, or enter a
@@ -362,7 +378,12 @@ function renderComments(c) {
       `<div class="cmeta">${esc(it.author || "(no author)")}` +
       `${it.timestamp ? " · " + esc(it.timestamp) : ""}` +
       `${it.deleted ? ' · <span class="warn">deleted</span>' : ""}</div>` +
-      `<div>${esc(it.text)}</div></li>`;
+      // `html` rather than `text`: comments arrive with lists, quotes, code and emphasis, and
+      // rendering the flattened text made the engine look like it was stripping formatting it had
+      // never been asked for. Inserted as markup because it is the output of the *UserContent*
+      // sanitizer profile -- images off, media dropped, `rel="nofollow noopener noreferrer"` forced
+      // on every link (plan §1.8). `text` is the fallback for an item with no content subtree.
+      `<div class="cbody">${it.html || esc(it.text)}</div></li>`;
   }).join("") + "</ol>";
 }
 

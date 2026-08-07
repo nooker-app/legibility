@@ -55,22 +55,13 @@ else
   fail=1
 fi
 
-# 3. Nothing loaded from another host. A demo that phones out is not the demo we are claiming.
-#    Markup only, for the same reason.
-ext=$(python3 - "$DIST/index.html" 2>/dev/null <<'EOF'
-import re, sys
-s = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-cut = s.find("<script")
-print("\n".join(re.findall(r'(?:src|href)="(https?://[^"]*)"', s if cut < 0 else s[:cut])[:5]))
-EOF
-)
-ext="$ext$(grep -oE '@import[^;]*|importScripts\(' "$DIST/index.html" | head -3)"
-if [ -n "$ext" ]; then
-  say FAIL "external loadable references present:"
-  printf '        %s\n' "$ext"
-  fail=1
+# 3. Nothing *loaded* from another host. Links are fine -- see scripts/check-external-refs.py for
+#    why the distinction matters and how an earlier version of this failed on the repo link.
+if python3 scripts/check-external-refs.py "$DIST/index.html"; then
+  say PASS "nothing loads from another host"
 else
-  say PASS "no external src/href/import"
+  say FAIL "off-host loads present, listed above"
+  fail=1
 fi
 
 # 4. The module travels inside the file. Pages cannot set Content-Type reliably for .wasm and

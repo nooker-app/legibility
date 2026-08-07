@@ -586,10 +586,7 @@ impl TreeSink for BuildArena {
         let mut b = self.inner.borrow_mut();
         match child {
             NodeOrText::AppendNode(id) => b.link_last(*parent, id, self.limits.max_depth),
-            NodeOrText::AppendText(text) => {
-                let id = self.new_text(&mut b, &text);
-                b.link_last(*parent, id, self.limits.max_depth);
-            }
+            NodeOrText::AppendText(text) => self.append_text(&mut b, *parent, &text),
         }
     }
 
@@ -656,10 +653,7 @@ impl TreeSink for BuildArena {
         let mut b = self.inner.borrow_mut();
         match new_node {
             NodeOrText::AppendNode(id) => b.link_before(*sibling, id),
-            NodeOrText::AppendText(text) => {
-                let id = self.new_text(&mut b, &text);
-                b.link_before(*sibling, id);
-            }
+            NodeOrText::AppendText(text) => self.insert_text_before(&mut b, *sibling, &text),
         }
     }
 
@@ -692,9 +686,78 @@ impl TreeSink for BuildArena {
 }
 
 impl BuildArena {
-    /// Create a text node, merging into the previous sibling is handled by html5ever's
-    /// contract only for `append`; we always create a fresh node and let `flatten` see them
-    /// in order, which is equivalent for every statistic we compute.
+    /// Append text to `parent`, merging into its last child when that child is already text.
+    ///
+    /// # Why merging is not optional
+    ///
+    /// This used to allocate a fresh node per `AppendText` call, with a comment claiming it was
+    /// "equivalent for every statistic we compute". It is not, and the consequence was that
+    /// **guarantee S3 did not hold on 123 of the 130 corpus pages.**
+    ///
+    /// html5ever gates its data-state scanner on `target_arch`. On x86_64 and aarch64 a SIMD fast
+    /// path returns one long character run spanning newlines; on `wasm32` the scalar fallback breaks
+    /// the run at every `\n` and emits each newline as its own token. Identical documents therefore
+    /// arrived as different token streams — and with a node per token, the token stream *became* the
+    /// arena shape. [`Arena::accumulate_subtrees`] zeroes a text node only when the whole node is
+    /// whitespace, so the same document scored a different `prose_len` per target, and every ratio
+    /// built on it followed: `ars-1` reported a different headline, `lwn-1` selected a different
+    /// region, `iab-1` lost its byline.
+    ///
+    /// Merging makes the arena a function of the document rather than of how the tokenizer happened
+    /// to slice it, which is what a `TreeSink` is expected to do and what the fix had to be.
+    ///
+    /// The existing gate could not see any of this: it compares one hand-written fixture that is a
+    /// single line, and a document with no newline inside a text run is precisely the shape that
+    /// cannot diverge.
+    fn append_text(&self, b: &mut std::cell::RefMut<'_, Build>, parent: u32, text: &str) {
+        let last = b.nodes.get(parent as usize).map_or(NONE, |n| n.last_child);
+        if last != NONE && self.extend_text(b, last, text) {
+            return;
+        }
+        let id = self.new_text(b, text);
+        b.link_last(parent, id, self.limits.max_depth);
+    }
+
+    /// Insert text before `sibling`, merging into `sibling`'s previous node when that is text.
+    fn insert_text_before(&self, b: &mut std::cell::RefMut<'_, Build>, sibling: u32, text: &str) {
+        let prev = b.nodes.get(sibling as usize).map_or(NONE, |n| n.prev_sib);
+        if prev != NONE && self.extend_text(b, prev, text) {
+            return;
+        }
+        let id = self.new_text(b, text);
+        b.link_before(sibling, id);
+    }
+
+    /// Extend an existing text node with `text`, or report that it cannot be done.
+    ///
+    /// Refused unless the node is text whose bytes end exactly at the tip of `doc_buf`, because the
+    /// span has to stay a single contiguous range — the verbatim invariant (plan §1.4) is stated
+    /// over `doc_buf[span]` and a stitched-together range would not be one. In practice text arrives
+    /// in a run, so the tip is where it is; when it is not, a fresh node is correct and merely
+    /// misses one merge.
+    fn extend_text(&self, b: &mut std::cell::RefMut<'_, Build>, id: u32, text: &str) -> bool {
+        let Some(n) = b.nodes.get(id as usize) else { return false };
+        if n.kind != NodeKind::Text || n.text.1 as usize != b.doc_buf.len() {
+            return false;
+        }
+        let (_, end) = b.push_text(text, &self.limits);
+        let start = match b.nodes.get_mut(id as usize) {
+            Some(n) => {
+                n.text.1 = end;
+                n.text.0
+            }
+            None => return false,
+        };
+        // The icon-glyph signal is a property of the whole node, so it has to be re-decided against
+        // the merged text: a private-use run followed by a real word is not an icon.
+        let pua = is_private_use_only(b.doc_buf.get(start as usize..end as usize).unwrap_or(""));
+        if let Some(n) = b.nodes.get_mut(id as usize) {
+            n.own_role = if pua { TextRole::Control } else { TextRole::Prose };
+        }
+        true
+    }
+
+    /// Create a fresh text node.
     fn new_text(&self, b: &mut std::cell::RefMut<'_, Build>, text: &str) -> u32 {
         let id = b.new_node(NodeKind::Text, (*EMPTY_NAME).clone(), &self.limits);
         let range = b.push_text(text, &self.limits);

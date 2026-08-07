@@ -177,5 +177,5 @@ fn prose_text(arena: &Arena, region: NodeId) -> String {
 /// emit identical bytes -- the cross-target determinism gate compares them.
 fn to_json(arena: &Arena, hit: LimitsHit) -> String {
     let out = legibility_core::extract_all(arena, Limits::DEFAULT);
-    legibility_dom::json::extraction_json(arena, &out, hit, None)
+    legibility_dom::json::extraction_json_limited(arena, &out, hit, None, Limits::DEFAULT)
 }

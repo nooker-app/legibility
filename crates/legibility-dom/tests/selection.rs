@@ -679,3 +679,225 @@ fn a_label_beside_the_headline_goes_but_never_the_body_with_it() {
     assert!(dek_text.contains("Neon, briefly"), "the dek was eaten: {dek_text}");
     assert!(!dek_text.contains("Design"), "the kicker survived: {dek_text}");
 }
+
+#[test]
+fn the_marked_article_body_beats_the_article_that_wraps_the_whole_page() {
+    // news.hada.io, reported five times over. One `<article>` holds the vote arrows, the credit bar,
+    // the body, the related-links list and the comments, and marks the body alone with
+    // `itemprop="articleBody"`. `<article>` is a real anchor and the wrong one; it is also the widest
+    // viable candidate, so no statistic finds the narrower claim.
+    let html = "<html><head><title>Warp Agent CLI | GeekNews</title></head><body><main>\
+        <article>\
+        <div class=\"topicinfo\">1P by <a href=\"/@neo\">GN⁺</a> \
+          <time datetime=\"2026-08-05T22:05:33+09:00\">20시간전</time> | \
+          <a href=\"topic?id=1\">댓글 2개</a></div>\
+        <section itemprop=\"articleBody\"><p>독립형 CLI로 제공해 다른 터미널에서도 사용할 수 있음</p>\
+          <p>tmux와 유사한 멀티플렉싱 구조로 PTY 연결을 관리함</p></section>\
+        <div class=\"related-topics\"><h2>함께 보면 좋은 글</h2>\
+          <ul><li><a href=\"/topic?id=2\">Herdr - 터미널 워크스페이스</a></li>\
+          <li><a href=\"/topic?id=3\">telepty — 컨트롤 플레인</a></li></ul></div>\
+        </article></main></body></html>";
+    let (_, text, _) = extract(html);
+    assert!(text.contains("PTY 연결"), "the marked body was not chosen: {text}");
+    assert!(!text.contains("GN⁺"), "the credit bar survived: {text}");
+    assert!(!text.contains("함께 보면"), "the related list survived: {text}");
+}
+
+#[test]
+fn navigation_inside_main_goes_but_content_in_a_form_stays() {
+    // GitHub puts the repository bar and the tab strip inside the same `<main>` as the pull request,
+    // so the body opened with `Code Issues 4 Pull requests 3 … Conversation Commits Checks`.
+    let gh = "<html><head><title>Reuse datasource connections · Pull Request #39</title></head>\
+        <body><main>\
+        <div id=\"repository-container-header\"><ul><li><a href=\"/n\">Notifications</a></li>\
+          <li><a href=\"/f\">Fork 6</a></li><li><a href=\"/s\">Star 78</a></li></ul></div>\
+        <nav aria-label=\"Repository\"><a href=\"/code\">Code</a><a href=\"/issues\">Issues 4</a>\
+          <a href=\"/pulls\">Pull requests 3</a><a href=\"/insights\">Insights</a></nav>\
+        <div class=\"comment-body\"><p>queryDatabase builds a datasource and closes it again on \
+          every sync, which costs a full connection handshake per source per interval.</p>\
+          <p>This reuses a pooled datasource keyed by type and config.</p></div>\
+        <footer><a href=\"/terms\">Terms</a><a href=\"/privacy\">Privacy</a></footer>\
+        </main></body></html>";
+    let (_, text, _) = extract(gh);
+    assert!(text.contains("pooled datasource"), "the body was lost: {text}");
+    for gone in ["Issues 4", "Pull requests 3", "Insights", "Notifications", "Star 78", "Privacy"] {
+        assert!(!text.contains(gone), "{gone:?} survived in the body: {text}");
+    }
+
+    // The invariant that keeps the rule from being a content shredder: removal must leave prose
+    // behind. A wiki edit preview puts the whole article inside a `<form>`, and losing it to tidy up
+    // a toolbar is much the worse error.
+    let wiki = "<html><head><title>Editing Neon lighting</title></head><body><main>\
+        <form action=\"/save\"><div>\
+        <p>Neon lighting was invented in 1910 and spread through every city centre before the \
+          cheaper alternatives arrived to replace it.</p>\
+        <p>The tubes are filled at low pressure and excited by a few thousand volts.</p>\
+        </div></form></main></body></html>";
+    let (_, wiki_text, _) = extract(wiki);
+    assert!(
+        wiki_text.contains("invented in 1910"),
+        "an article inside a <form> was excluded: {wiki_text:?}"
+    );
+}
+
+#[test]
+fn a_boilerplate_name_alone_does_not_remove_a_block_that_holds_prose() {
+    // Readability removes any element whose class or id matches a word list, which is also how it
+    // eats articles. Here the name has to agree with the structure: no authored paragraph *and*
+    // mostly links. A share widget wrapped around a pull quote keeps its quote.
+    let html = "<html><head><title>Why Neon Is Fading</title></head><body><main><article>\
+        <div class=\"social-share\"><blockquote>The tubes are hand-bent, one letter at a \
+          time.</blockquote><a href=\"/x\">Share</a></div>\
+        <p>Neon lighting was invented in 1910 and spread through every city centre before the \
+          cheaper alternatives arrived.</p>\
+        <p>The craft survives in a few workshops, mostly for restoration work.</p>\
+        </article></main></body></html>";
+    let (_, text, _) = extract(html);
+    assert!(text.contains("hand-bent"), "a named block lost its quote: {text}");
+    assert!(text.contains("invented in 1910"), "the body was lost: {text}");
+}
+
+#[test]
+fn timeline_events_are_not_comments_but_paragraphs_still_are() {
+    // A GitHub pull request's `added 3 commits` and `mentioned this pull request` carry an author
+    // link and a timestamp exactly as a comment does, so micro-metadata cannot separate them. Three
+    // of them outnumbered the real conversation and commit records were reported as comments.
+    let mut events = String::from(
+        "<html><head><title>perf(hub): reuse datasource connections · Pull Request #39</title>\
+         </head><body><main>\
+         <div class=\"comment-body\"><p>queryDatabase builds a datasource and closes it again on \
+           every sync, which costs a connection handshake per source per interval.</p></div>\
+         <div id=\"timeline\">",
+    );
+    for i in 0..3 {
+        events.push_str(&format!(
+            "<div class=\"TimelineItem\" id=\"event-{i}\">\
+             <a href=\"/selenehyun\">selenehyun</a> added {i} commits \
+             <a href=\"#c{i}\"><time datetime=\"2026-08-05T12:4{i}:50+09:00\">August 5</time></a>\
+             <div><pre><code>891881{i}</code></pre>\
+             <a href=\"/commit/891881{i}\">perf(lynqhub): reuse datasource connections</a></div>\
+             </div>"
+        ));
+    }
+    events.push_str("</div></main></body></html>");
+    let (_, _, n) = extract(&events);
+    assert_eq!(n, 0, "timeline events were reported as {n} comment(s)");
+
+    // And the signal must not cost a real thread: the same shape *with* authored paragraphs is one.
+    let (_, _, real) = extract(&discussion_shaped(18));
+    assert_eq!(real, 18, "a genuine thread was lost to the paragraph rule");
+}
+
+#[test]
+fn a_thread_we_could_not_find_is_reported_as_incomplete_rather_than_absent() {
+    // A topic with one reply: a lone element cannot form a repeated group, so detection finds
+    // nothing. Reporting `count: 0` with no claim is the silent omission plan §1.9 exists to make
+    // impossible — the caller cannot tell "no comments" from "we missed them".
+    let html = "<html><head><title>Irken, a small IRC client | GeekNews</title></head>\
+        <body><main><article>\
+        <div class=\"topicinfo\">1P by <a href=\"/@neo\">GN⁺</a> \
+          <time datetime=\"2026-08-05T22:05:33+09:00\">19시간전</time> | \
+          <a href=\"topic?id=1\">댓글 1개</a></div>\
+        <section itemprop=\"articleBody\"><p>Tcl/Tk로 만든 IRC 클라이언트로, 코드를 이해하고 개조할 \
+          수 있을 만큼 작은 규모를 지향함</p></section>\
+        <div id=\"comment_thread\"><div class=\"comment_row\" id=\"cid1\">\
+          <div class=\"commentinfo\"><a href=\"/@u1\">사용자1</a>\
+            <time datetime=\"2026-08-05T23:00:00+09:00\">19시간전</time></div>\
+          <div><p>재미있네요. 직접 고쳐 쓸 수 있는 크기라는 점이 좋습니다.</p></div></div></div>\
+        </article></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let c = &out.comments.completeness;
+    assert_eq!(c.claimed_total, Some(1), "the page's own count was not reported");
+    assert!(
+        out.comments.items.is_empty() && c.truncated,
+        "present {} with truncated {} — a short thread must say so",
+        c.present,
+        c.truncated
+    );
+}
+
+#[test]
+fn a_truncated_region_still_closes_every_tag_it_opened() {
+    // The cap used to `break` mid-walk, dropping the close step it had just popped and abandoning
+    // the rest of the stack — so a truncated article ended inside an element. A consumer inserting
+    // that fragment has its own markup adopted into the hole, and reparsing it does not give back
+    // the tree it was a prefix of.
+    let mut html = String::from("<html><head><title>Long</title></head><body><main><article>");
+    for i in 0..200 {
+        html.push_str(&format!("<div><p>Paragraph number {i} of a very long article.</p></div>"));
+    }
+    html.push_str("</article></main></body></html>");
+
+    let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let (frag, report) = legibility_dom::serialize::serialize_region::<legibility_sanitize::Article>(
+        &arena,
+        n,
+        legibility_dom::serialize::SerializeOptions { max_output_bytes: 400, ..Default::default() },
+    );
+    assert!(report.truncated, "the cap did not fire");
+
+    // Every opened tag is closed, innermost first. Counting is enough to catch the regression and
+    // needs no parser: an unbalanced fragment leaves names on the stack.
+    let s = frag.as_str();
+    let mut open: Vec<&str> = Vec::new();
+    let mut rest = s;
+    while let Some(at) = rest.find('<') {
+        rest = &rest[at + 1..];
+        let end = rest.find('>').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        if let Some(name) = tag.strip_prefix('/') {
+            assert_eq!(open.pop(), Some(name), "close tag with no matching open in {s:?}");
+        } else if !tag.starts_with('!') && !tag.ends_with('/') {
+            let name = tag.split_whitespace().next().unwrap_or(tag);
+            // Void elements never close.
+            if !matches!(name, "img" | "br" | "hr" | "wbr" | "source" | "track") {
+                open.push(name);
+            }
+        }
+        rest = &rest[end.min(rest.len())..];
+    }
+    assert!(open.is_empty(), "truncated fragment left {open:?} unclosed: {s:?}");
+}
+
+#[test]
+fn the_host_output_cap_is_actually_enforced() {
+    // `Limits::max_output_bytes` was declared, documented per host profile — 4 MiB in a browser,
+    // 2 MiB in an iOS share extension because an extension is killed for memory far sooner than its
+    // host app — and read by nothing. Every serialization used the serializer's own 16 MiB default,
+    // so both host caps were decoration. A limit nobody enforces is worse than no limit: a caller
+    // reads it and plans around a bound that is not there.
+    let mut html = String::from("<html><head><title>Long</title></head><body><main><article>");
+    for i in 0..4000 {
+        html.push_str(&format!(
+            "<p>Paragraph number {i}, with enough words in it to add up to a document larger than \
+             the smallest host profile is willing to hand back in one piece.</p>"
+        ));
+    }
+    html.push_str("</article></main></body></html>");
+
+    let small = Limits { max_output_bytes: 64 * 1024, ..Limits::IOS_APP_EXTENSION };
+    let (arena, hit) = BuildArena::parse_to_arena(&html, small);
+    let out = legibility_core::extract_all(&arena, small);
+    let json = legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, small);
+    assert!(
+        json.contains("\"truncated\":true"),
+        "a {} KB cap did not truncate a {} KB document",
+        small.max_output_bytes / 1024,
+        html.len() / 1024
+    );
+
+    // And the default profile must not truncate the same document, or the cap is just a bug.
+    let (arena, hit) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let json = legibility_dom::json::extraction_json_limited(
+        &arena,
+        &out,
+        hit,
+        None,
+        Limits::DEFAULT,
+    );
+    assert!(json.contains("\"truncated\":false"), "the default profile truncated");
+}

@@ -1,5 +1,6 @@
 {
   "schema_version":1,
+  "url":null,
   "article":{
     "html":"<article><div>By A Reporter <time datetime=\"2026-07-24T20:36:22Z\">24 July 2026</time></div><h1>Markets close higher as industrials rally</h1><p>Equities finished the session up across the board, with the broadest gains in industrials and a late rally in energy that carried the index past its opening level.</p><p>Traders pointed to the morning's inventory numbers, which came in well under the range most desks had been working from, as the reason the afternoon turned.</p><figure><img src=\"/img/floor.jpg\" alt=\"Traders on the exchange floor\"><figcaption>The floor at close.</figcaption></figure></article>",
     "text":"By A Reporter 24 July 2026 Markets close higher as industrials rally Equities finished the session up across the board, with the broadest gains in industrials and a late rally in energy that carried the index past its opening level. Traders pointed to the morning's inventory numbers, which came in well under the range most desks had been working from, as the reason the afternoon turned. The floor at close.",
@@ -16,6 +17,7 @@
     "signal_conflict":false,
     "calibrated":false
   },
+  "no_article":null,
   "comments":{
     "count":0,
     "depth_source":null,

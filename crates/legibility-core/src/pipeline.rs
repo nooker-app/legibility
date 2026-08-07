@@ -67,10 +67,20 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
 
     // The comment thread is the largest qualifying group. Largest rather than first because a page
     // can contain a small "related discussion" widget alongside the real thread.
+    // Largest, and on a tie the one that appears first. `max_by_key` alone returns the *last*
+    // maximum, which is the opposite of the document-order rule stated everywhere else here and
+    // would hand back a different thread for two groups of equal prose. Reversing the first member's
+    // index inside the key makes the whole key a total order, so the choice cannot depend on
+    // iteration order or on which of two equal groups was seen last.
     let thread = groups
         .iter()
         .filter(|g| g.is_comment_thread(stated_total))
-        .max_by_key(|g| g.prose_len);
+        .max_by_key(|g| {
+            (
+                g.prose_len,
+                core::cmp::Reverse(g.members.first().map_or(u32::MAX, |m| m.0)),
+            )
+        });
 
     let masked = if thread.is_some() {
         groups::mask_comment_prose(arena, &groups, stated_total)
@@ -101,7 +111,17 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
             fill_completeness(arena, &mut set, stated_total);
             set
         }
-        _ => CommentSet::default(),
+        // No thread found, but the page may still say it has comments -- a topic with a single reply
+        // states `댓글 1개` and a lone element cannot form a repeated group, so detection finds
+        // nothing. Reporting `count: 0` and `claimed_total: null` there is the silent omission plan
+        // §1.9 exists to make impossible: the caller cannot tell "no comments" from "we missed them".
+        // Filling completeness anyway turns it into `0 of 1, truncated`, which is what actually
+        // happened.
+        _ => {
+            let mut set = CommentSet::default();
+            fill_completeness(arena, &mut set, stated_total);
+            set
+        }
     };
 
     // A listing is a page whose prose is dominated by a repeated group that is *not* a discussion.
@@ -122,6 +142,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
             let mut v: Vec<crate::NodeId> = comments.items.iter().map(|c| c.node).collect();
             sections = comment_section_nodes(arena, region, &v);
             v.extend(sections.iter().copied());
+            v.extend(furniture_landmarks(arena, region));
             v
         }
         None => Vec::new(),
@@ -201,6 +222,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
 /// A share threshold was tried first and got this backwards: at "no more than half the region" the
 /// genuine case failed whenever the boilerplate outweighed a short post, which is the case that
 /// motivated the rule.
+///
 #[must_use]
 pub fn comment_section_nodes(
     arena: &Arena,
@@ -263,6 +285,158 @@ pub fn comment_section_nodes(
     found
 }
 
+/// Boilerplate tokens in `class` or `id`, **corroborated by structure**.
+///
+/// This is the Readability rule that our engine had no equivalent of, and the difference showed on a
+/// GitHub pull request: the repository bar — `Notifications  Fork 6  Star 78` — sits in a `<div>`
+/// inside `<main>`, carries no landmark role, and reads as body text. Readability removes it because
+/// its id is `repository-container-header` and `header` is one of the words in its
+/// `unlikelyCandidates` list.
+///
+/// Trusting the name alone is also how Readability eats articles, so the name is necessary here and
+/// not sufficient. A subtree is furniture when it is *named* like furniture **and**
+///
+/// - contains no paragraph or blockquote carrying prose — an authored block is content whatever the
+///   wrapper is called, which is what protects an `<div class="social-share">` wrapped around a pull
+///   quote, and
+/// - is mostly links, so a navigation bar qualifies and an article section named `related-notes`
+///   with real sentences does not.
+///
+/// That makes it strictly more conservative than the upstream rule while removing the same thing on
+/// the page that motivated it.
+fn named_furniture(arena: &Arena, node: crate::NodeId) -> bool {
+    /// Whole `-`/`_`-separated tokens only: `header` must not match `headline`, and `ad` must never
+    /// be a substring test at all.
+    const TOKENS: [&str; 14] = [
+        "header", "footer", "nav", "navigation", "menu", "sidebar", "banner", "breadcrumb",
+        "breadcrumbs", "toolbar", "pagination", "pager", "social", "share",
+    ];
+    let named = [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
+        .into_iter()
+        .filter_map(|a| arena.attr(node, a))
+        .any(|v| {
+            v.split([' ', '-', '_'])
+                .any(|t| TOKENS.iter().any(|k| t.eq_ignore_ascii_case(k)))
+        });
+    if !named {
+        return false;
+    }
+    !holds_authored_block(arena, node) && arena.link_density(node) > 0.5
+}
+
+/// Whether a subtree contains a form control — something that could actually be submitted.
+fn holds_control(arena: &Arena, node: crate::NodeId) -> bool {
+    let end = (arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    (node.idx()..end).any(|i| {
+        arena.kind.get(i).copied() == Some(crate::NodeKind::Element)
+            && matches!(
+                arena.tag.get(i).copied(),
+                // No `textarea` in the interned set; `input`, `button` and `select` are enough
+                // to recognise anything that submits, and a bare `<textarea>` with no button is
+                // not a form anyone can send.
+                Some(crate::TagId::INPUT | crate::TagId::BUTTON | crate::TagId::SELECT)
+            )
+    })
+}
+
+/// Whether a subtree contains a paragraph or a blockquote carrying prose.
+///
+/// The one test that separates "a wrapper someone wrote into" from "a strip of controls", and the
+/// reason both the named match above and the `<form>` case can be trusted at all.
+fn holds_authored_block(arena: &Arena, node: crate::NodeId) -> bool {
+    let end = (arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    (node.idx()..end).any(|i| {
+        arena.kind.get(i).copied() == Some(crate::NodeKind::Element)
+            && matches!(arena.tag.get(i).copied(), Some(crate::TagId::P | crate::TagId::BLOCKQUOTE))
+            && arena.prose_len.get(i).copied().unwrap_or(0) > 0
+    })
+}
+
+/// Page furniture inside the chosen region, by its own declared role.
+///
+/// Plan §1.10.4 lists these as negative landmarks and [`crate::TagId::is_negative_landmark`] has
+/// existed unused since. The gap shows on any application-shaped page: GitHub puts its repository
+/// navigation *inside* `<main>`, so the extracted body of a pull request opened with
+///
+/// ```text
+///   Code  Issues 4  Pull requests 3  Discussions  Actions  Security  Insights
+///   Conversation  Commits (5)  Checks  Files changed
+/// ```
+///
+/// Readability drops all of that, and a `<nav>` is the page telling us it is navigation, which is
+/// better evidence than any statistic we could compute about it.
+///
+/// # What is excluded, and what is deliberately not
+///
+/// `<nav>`, `<footer>` and `<form>` only. Two of the five negative landmarks are left in, each for a
+/// measured reason:
+///
+/// - **`<aside>`** was excluded first and cost `nytimes-3` 0.988 → 0.952. The NYT wraps body
+///   paragraphs in it — *"In the late 1800s, many of the city's overhead utilities were buried…"* is
+///   article prose inside an `<aside>`, as are most of the article's images. The element is widely
+///   used to mean "a floated block", not "not the article", so the claim is not worth trusting.
+/// - **`<header>`** inside an article usually holds the headline and the dateline, which are wanted —
+///   plan D4 routes those to `lead` rather than deleting them — and on a pull request it holds the
+///   title. Excluding it would be a second, much larger change wearing this one's clothes.
+///
+/// `<nav>` and `<footer>` survive that objection because their meaning is unambiguous in the spec
+/// and sites do not reach for them to lay out prose. `<form>` carries the comment composer, which is
+/// the same furniture problem that motivated [`comment_section_nodes`].
+///
+/// The same invariant as comment sections: removal must leave prose behind. A page whose entire
+/// body sits inside a `<form>` exists (a wiki edit preview, a search-results article), and losing
+/// it to tidy up a toolbar is the worse error.
+fn furniture_landmarks(arena: &Arena, region: crate::NodeId) -> alloc::vec::Vec<crate::NodeId> {
+    let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    let mut out = alloc::vec::Vec::new();
+    let mut removed = 0u32;
+    // Ancestor stack of open `<blockquote>`/`<figure>` subtree ends: inside either, a `<footer>` is
+    // the *attribution* and the HTML spec says so explicitly. Excluding it deletes the name of the
+    // person being quoted, which is content by any reading.
+    let mut quoting: alloc::vec::Vec<usize> = alloc::vec::Vec::new();
+    let mut i = region.idx() + 1;
+    while i < end {
+        while quoting.last().is_some_and(|&e| i >= e) {
+            quoting.pop();
+        }
+        let tag = arena.tag.get(i).copied().unwrap_or(crate::TagId::UNKNOWN);
+        let is_element = arena.kind.get(i).copied() == Some(crate::NodeKind::Element);
+        if is_element && matches!(tag, crate::TagId::BLOCKQUOTE | crate::TagId::FIGURE) {
+            quoting.push((arena.subtree_end.get(i).copied().unwrap_or(0) as usize).max(i + 1));
+        }
+        let semantic = match tag {
+            crate::TagId::NAV => true,
+            crate::TagId::FOOTER => quoting.is_empty(),
+            // A `<form>` is a wrapper as often as it is a toolbar. old.reddit.com puts every post
+            // body *and* every comment body inside `<form class="usertext" action="#"
+            // onsubmit="return false;">`, so excluding it on the tag alone deleted the site. The
+            // page-level "leaves prose behind" invariant below does not save that: the comment
+            // bodies are not the region's only prose.
+            //
+            // The corroboration is whether it has anything to submit. A newsletter box or a search
+            // bar contains an `<input>` or a `<button>`; a form used purely for layout contains
+            // none, and is a `<div>` wearing the wrong tag. Requiring "no authored paragraph"
+            // instead was tried and cost `theverge` 0.906 → 0.880, because a signup box legitimately
+            // carries one line of prose telling you what you are signing up for.
+            crate::TagId::FORM => holds_control(arena, crate::NodeId(i as u32)),
+            _ => false,
+        };
+        if is_element && (semantic || named_furniture(arena, crate::NodeId(i as u32))) {
+            out.push(crate::NodeId(i as u32));
+            removed = removed.saturating_add(arena.prose_len.get(i).copied().unwrap_or(0));
+            // Skip the subtree: a `<nav>` inside an excluded `<aside>` adds nothing, and nested
+            // entries would double-count `removed`.
+            i = (arena.subtree_end.get(i).copied().unwrap_or(0) as usize).max(i + 1);
+            continue;
+        }
+        i += 1;
+    }
+    if arena.prose_len.get(region.idx()).copied().unwrap_or(0) <= removed {
+        out.clear();
+    }
+    out
+}
+
 /// Whether a non-comment repeated group holds most of the page's prose.
 ///
 /// The threshold is a *share*, not a count: a front page is mostly its list of items, while an
@@ -306,12 +480,13 @@ fn fill_completeness(arena: &Arena, set: &mut CommentSet, stated_total: Option<u
     let short = stated_total.is_some_and(|c| c > set.completeness.present);
     if short || !continuation.is_empty() {
         set.completeness.truncated = true;
-        if set.completeness.reason.is_none() {
-            set.completeness.reason = Some(if continuation.is_empty() {
-                comments::TruncationReason::LoadMoreStub
-            } else {
-                comments::TruncationReason::Pagination
-            });
+        // A reason only where there is evidence for one. `LoadMoreStub` used to be the fallback for
+        // "short and no continuation link", which reads as a finding about the page when it is
+        // really an absence of one: the thread can also be short because *we* failed to detect it,
+        // as happens on a topic with a single reply, where one element cannot form a repeated group.
+        // `truncated: true, reason: null` says "incomplete, cause unknown", which is the truth.
+        if set.completeness.reason.is_none() && !continuation.is_empty() {
+            set.completeness.reason = Some(comments::TruncationReason::Pagination);
         }
     }
     set.completeness.continuation = continuation;
@@ -580,6 +755,7 @@ mod tests {
         // An article ending in a five-item "related posts" block must not be called a listing, no
         // matter how many items that block has.
         let small = Group {
+            paragraph_ratio: 1.0,
             parent: crate::NodeId(0),
             members: alloc::vec![crate::NodeId(1), crate::NodeId(2), crate::NodeId(3)],
             signature: 1,

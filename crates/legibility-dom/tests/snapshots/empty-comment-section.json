@@ -1,5 +1,6 @@
 {
   "schema_version":1,
+  "url":null,
   "article":{
     "html":"<article><p>The warmer runs from the same queue as everything else, which is why it is bounded by the same concurrency limit and why a cold start is slower than the numbers suggest.</p><p>Each entry is fetched once and shared, so a burst of readers for the same key costs one fetch rather than one per reader.</p></article>",
     "text":"The warmer runs from the same queue as everything else, which is why it is bounded by the same concurrency limit and why a cold start is slower than the numbers suggest. Each entry is fetched once and shared, so a burst of readers for the same key costs one fetch rather than one per reader.",
@@ -16,6 +17,7 @@
     "signal_conflict":false,
     "calibrated":false
   },
+  "no_article":null,
   "comments":{
     "count":0,
     "depth_source":null,

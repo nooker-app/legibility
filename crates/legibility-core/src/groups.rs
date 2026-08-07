@@ -93,6 +93,21 @@ pub struct Group {
     /// text*, while a comment's author link is a few characters against a paragraph. One number,
     /// and the two shapes fall apart.
     pub mean_max_link_share: f32,
+    /// Share of members containing at least one paragraph-level text block.
+    ///
+    /// The signal that separates a comment from a *timeline event*, which is the S-6 confusion plan
+    /// §1.7 names and nothing implemented. On a GitHub pull request the events carry an author link
+    /// and a timestamp exactly as comments do, so micro-metadata cannot tell them apart:
+    ///
+    /// | group | members | prose | paragraphs |
+    /// |---|---|---|---|
+    /// | real comments (`<rails-partial>`) | 2 | 20410 | **36** |
+    /// | `added 3 commits`, `mentioned this pull request` | 3 | 8413 | **0** |
+    ///
+    /// A person writing a comment writes paragraphs; an event is a sentence assembled from links, a
+    /// verb and a date. The events won only by having a third member, so this is also what lets the
+    /// real pair in — see [`Group::is_comment_thread`].
+    pub paragraph_ratio: f32,
     /// Whether the members were gathered by their shared `(tag, class)` rather than by a shared
     /// structural signature — see [`identity_group`].
     ///
@@ -136,6 +151,20 @@ impl Group {
     pub fn is_comment_thread(&self, stated_total: Option<u32>) -> bool {
         let corroborated = stated_total.is_some_and(|n| n as usize == self.members.len());
         if self.members.len() < MIN_GROUP && !corroborated {
+            return false;
+        }
+        // Half the members must contain an authored paragraph. Three link-and-verb *events* are not
+        // a thread however many of them there are, which is what a GitHub pull request produced:
+        // `added 3 commits` and `mentioned this pull request` cleared every other gate here, since
+        // an event carries an author link and a timestamp exactly as a comment does.
+        //
+        // Admitting the pull request's real conversation is a separate and larger job. GitHub renders
+        // the PR description *as* the first comment, so recognising the pair promotes the article
+        // into the thread and the body comes back empty — plan §1.7's S-6 says the issue body is the
+        // article, and implementing that is M9. Rejecting the events is the half that is correct on
+        // its own: no timeline event is reported as a comment, and no comment text was being
+        // recovered from these pages anyway.
+        if self.paragraph_ratio < 0.5 {
             return false;
         }
         if self.micro_metadata_ratio < 0.7 {
@@ -354,10 +383,23 @@ pub fn merge_by_signature(arena: &Arena, groups: &[Group]) -> Vec<Group> {
             class_bits(arena, m),
         )
     };
+    // Key every group once, then merge runs of equal keys after a sort. The obvious version --
+    // scanning the accumulated output for a match per input group -- is O(groups^2) *and* recomputes
+    // `class_bits` (an attribute lookup, a whitespace split and an FNV hash per class token) on both
+    // sides of every comparison. Measured at 2.5 s inside one 2.7 MB page and 109 s on a 10.9 MB one,
+    // which at the 32 MiB default input cap is not a slow page but a hang.
+    //
+    // Sorted rather than hashed: `clippy.toml` bans `HashMap` workspace-wide so that no output can
+    // depend on iteration order (S3), and a sort by an integer key is deterministic by construction.
+    let mut keyed: Vec<((u16, u64), usize)> =
+        groups.iter().enumerate().map(|(i, g)| (key(g), i)).collect();
+    // Ties broken by original index, so equal-keyed groups merge in document order.
+    keyed.sort_unstable();
+
     let mut out: Vec<Group> = Vec::new();
-    for g in groups {
-        let k = key(g);
-        match out.iter_mut().find(|o| key(o) == k) {
+    for (k, i) in keyed {
+        let Some(g) = groups.get(i) else { continue };
+        match out.last_mut().filter(|o| key(o) == k) {
             Some(existing) => {
                 existing.members.extend_from_slice(&g.members);
                 // Weakest evidence wins: a union holding identity-gathered members rests on
@@ -407,12 +449,18 @@ pub fn find_groups(arena: &Arena) -> Vec<Group> {
         // Signature -> members, as a small association list. A map would be faster asymptotically
         // but sibling counts are small, and a Vec keeps iteration order tied to the document
         // rather than to a hash (S3).
+        // Signature -> members, by sorting rather than by a linear scan per child. The scan was
+        // justified with "sibling counts are small", which holds until a page has one parent with
+        // thousands of distinctly-classed children -- signatures then never match, every lookup
+        // walks the whole list, and one 918 KB page spent 395 ms here, 421x its matching-signature
+        // twin. Sorting keeps it deterministic (no hash iteration, S3) at O(k log k).
+        let mut sigs: Vec<(u64, u32)> = kids.iter().map(|&k| (signature(arena, k), k.0)).collect();
+        sigs.sort_unstable();
         let mut buckets: Vec<(u64, Vec<NodeId>)> = Vec::new();
-        for &k in &kids {
-            let sig = signature(arena, k);
-            match buckets.iter_mut().find(|(s, _)| *s == sig) {
-                Some((_, v)) => v.push(k),
-                None => buckets.push((sig, alloc::vec![k])),
+        for (sig, id) in sigs {
+            match buckets.last_mut().filter(|(s, _)| *s == sig) {
+                Some((_, v)) => v.push(NodeId(id)),
+                None => buckets.push((sig, alloc::vec![NodeId(id)])),
             }
         }
 
@@ -452,18 +500,25 @@ pub fn find_groups(arena: &Arena) -> Vec<Group> {
 /// Requires a class: a bare `(tag, 0)` identity would group every unadorned `<div>` under a parent,
 /// which is not the site claiming anything.
 fn identity_group(arena: &Arena, parent: NodeId, kids: &[NodeId]) -> Option<Group> {
+    // Sorted, for the same reason `find_groups` is: a linear scan per child is O(kids^2), and the
+    // page that exposes it is one parent with thousands of distinctly-classed children — 8000 of
+    // them cost 10.5 s before this, on a 641 KB document.
+    let mut ids: Vec<((u16, u64), u32)> = kids
+        .iter()
+        .filter_map(|&k| {
+            let id = (
+                arena.tag.get(k.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
+                class_bits(arena, k),
+            );
+            (id.1 != 0).then_some((id, k.0))
+        })
+        .collect();
+    ids.sort_unstable();
     let mut buckets: Vec<((u16, u64), Vec<NodeId>)> = Vec::new();
-    for &k in kids {
-        let id = (
-            arena.tag.get(k.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
-            class_bits(arena, k),
-        );
-        if id.1 == 0 {
-            continue;
-        }
-        match buckets.iter_mut().find(|(i, _)| *i == id) {
-            Some((_, v)) => v.push(k),
-            None => buckets.push((id, alloc::vec![k])),
+    for (id, node) in ids {
+        match buckets.last_mut().filter(|(i, _)| *i == id) {
+            Some((_, v)) => v.push(NodeId(node)),
+            None => buckets.push((id, alloc::vec![NodeId(node)])),
         }
     }
     // Largest, then document order — the same tie-break rule as everywhere else, so the choice
@@ -471,7 +526,10 @@ fn identity_group(arena: &Arena, parent: NodeId, kids: &[NodeId]) -> Option<Grou
     let (id, members) = buckets
         .into_iter()
         .filter(|(_, m)| m.len() >= MIN_SIBLINGS)
-        .max_by_key(|(_, m)| m.len())?;
+        // Largest, then document order. `max_by_key` returns the last maximum, so the first member's
+        // index has to enter the key reversed for two equally-sized buckets to resolve the same way
+        // every time.
+        .max_by_key(|(_, m)| (m.len(), core::cmp::Reverse(m.first().map_or(u32::MAX, |n| n.0))))?;
     // Keyed by identity rather than by structure, which is what this group means. The value only
     // has to be stable and distinct, and `merge_by_signature` re-keys by identity anyway.
     Some(Group {
@@ -495,6 +553,7 @@ fn element_children(arena: &Arena, p: usize) -> Vec<NodeId> {
 
 fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>) -> Group {
     let mut with_micro = 0usize;
+    let mut with_paragraph = 0usize;
     let mut prose_total: u32 = 0;
     let mut link_sum = 0.0f32;
     let mut all_headings = true;
@@ -519,6 +578,9 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
         if !has_heading(arena, m, end) {
             all_headings = false;
         }
+        if has_paragraph(arena, m, end) {
+            with_paragraph = with_paragraph.saturating_add(1);
+        }
     }
 
     let n = members.len() as f32;
@@ -532,10 +594,30 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
         all_members_have_heading: all_headings,
         mean_max_link_share: guarded_div(max_link_share_sum, n),
         mean_first_link_share: guarded_div(first_link_share_sum, n),
+        paragraph_ratio: guarded_div(with_paragraph as f32, n),
         members,
         // Structural by default; `identity_group` is the one caller that overrides this.
         by_identity: false,
     }
+}
+
+/// Whether an item contains a paragraph-level text block carrying prose.
+///
+/// `<p>` and `<blockquote>` only.
+///
+/// Not `<li>`: a commit list is list items. Not `<pre>` either, which was tried and let the GitHub
+/// timeline back in — its commit rows carry three `<pre>` blocks for the hashes, so the ratio came
+/// out at 1.0 on a group with zero paragraphs. A `<pre>` is a verbatim block, which is evidence that
+/// someone pasted something, not that someone wrote something.
+fn has_paragraph(arena: &Arena, node: NodeId, end: usize) -> bool {
+    (node.idx()..end.min(arena.len())).any(|i| {
+        arena.kind.get(i).copied() == Some(NodeKind::Element)
+            && matches!(
+                arena.tag.get(i).copied(),
+                Some(TagId::P | TagId::BLOCKQUOTE)
+            )
+            && arena.prose_len.get(i).copied().unwrap_or(0) > 0
+    })
 }
 
 /// Share of an item's prose held by its **first** link in document order.

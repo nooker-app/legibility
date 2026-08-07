@@ -55,6 +55,10 @@ fn cases() -> Vec<(&'static str, String)> {
         ("cards-are-not-a-listing", cards_are_not_a_listing()),
         ("serialization-oddities", serialization_oddities()),
         ("empty-comment-section", empty_comment_section()),
+        ("geeknews-topic-one-comment", geeknews_topic(1)),
+        ("geeknews-topic-two-comments", geeknews_topic(2)),
+        ("timeline-events-are-not-comments", timeline_events()),
+        ("nav-inside-main-is-not-body", nav_inside_main()),
     ]
 }
 
@@ -283,6 +287,146 @@ fn empty_comment_section() -> String {
      <section class=\"comments\"><div><p>Be the first to comment</p>\
        <p>Nobody's responded to this post yet. Add your thoughts and get the conversation \
        going.</p></div></section>\
+     </main></body></html>"
+        .to_string()
+}
+
+/// news.hada.io, S-2. One `<article>` holds everything; only the body is marked.
+///
+/// Reported three times over, at `topic?id=32176`, `32177`, `32178`, `32179` and `32183`: the
+/// extracted body opened with the credit bar and ran on into the comments —
+///
+/// ```text
+///   (warp.dev) 1 P by GN⁺ 20시간전 | ★ favorite | 댓글 1개  Warp Terminal의 …
+/// ```
+///
+/// `<article>` is a genuine semantic anchor and the wrong one, and it is also the widest viable
+/// candidate, so no statistic rescues it. `itemprop="articleBody"` is the only thing on the page that
+/// makes the narrower claim; plan §1.10.4 listed it from the start and nothing read it.
+///
+/// `n = 1` is the additional case: a lone comment cannot form a repeated group, so the page states
+/// `댓글 1개` and we still report none. The body must be right regardless, which is what this pins.
+fn geeknews_topic(comments: usize) -> String {
+    let mut s = format!(
+        "<html><head><title>Warp Agent CLI | GeekNews</title>\
+         <meta property=\"og:site_name\" content=\"GeekNews\"></head><body>\
+         <header><nav><a href=\"/\">GeekNews</a><a href=\"/new\">최신글</a>\
+           <a href=\"/comments\">댓글</a><a href=\"/ask\">Ask</a></nav></header>\
+         <main><article><div class=\"topic-table\">\
+           <div class=\"topic\">\
+             <div class=\"vote\"><a href=\"javascript:vote(1)\">▲</a></div>\
+             <div class=\"topictitle link\"><a href=\"https://warp.dev/blog/agent-cli\">\
+               <h1>Warp Agent CLI</h1></a> <span class=\"topicurl\">(warp.dev)</span></div>\
+             <div class=\"topicinfo\"><span>1</span>P by <a href=\"/@neo\">GN⁺</a> \
+               <time datetime=\"2026-08-05T22:05:33+09:00\">20시간전</time> | \
+               <a href=\"javascript:fav(1)\">★ favorite</a> | \
+               <a href=\"topic?id=1\">댓글 {comments}개</a></div>\
+             <div class=\"topic_contents\"><div>\
+               <section id=\"topic_contents\" class=\"article-content\" itemprop=\"articleBody\">\
+                 <ul><li>Warp Terminal의 다중 모델 코딩 에이전트를 <strong>독립형 CLI</strong>로 \
+                   제공해 다른 터미널에서도 사용할 수 있음</li>\
+                 <li>tmux와 유사한 <strong>멀티플렉싱 구조</strong>로 PTY 연결을 관리함</li></ul>\
+                 <h2>선호하는 터미널에서 실행하는 독립형 에이전트</h2>\
+                 <p>전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 \
+                   라우팅을 기본 제공함</p>\
+               </section></div></div></div></div>\
+           <div class=\"related-topics\"><h2>함께 보면 좋은 글</h2><ul>\
+             <li><div><a href=\"/topic?id=2\">Herdr - AI Agent 시대를 위한 터미널 워크스페이스</a>\
+               </div></li>\
+             <li><div><a href=\"/topic?id=3\">telepty — 여러 머신의 에이전트 세션 컨트롤 플레인</a>\
+               </div></li></ul></div>\
+           <div class=\"comment_form\"><form class=\"write_comment\">\
+             <textarea placeholder=\"친절하고 점잖은 댓글을 남겨주세요\"></textarea>\
+             <input type=\"submit\" value=\"댓글 달기\"></form></div>\
+           <div id=\"comment_thread\" class=\"comment_thread descendant\">"
+    );
+    for i in 0..comments {
+        s.push_str(&format!(
+            "<div class=\"comment_row\" id=\"cid{i}\" style=\"--depth:0\">\
+             <div class=\"vote\"><a href=\"javascript:votec({i})\">▲</a></div>\
+             <div class=\"commentinfo\"><a href=\"/@u{i}\">사용자{i}</a> \
+               <a href=\"/topic?id=1#cid{i}\"><time datetime=\"2026-08-05T23:0{i}:00+09:00\">\
+                 19시간전</time></a>\
+               <a href=\"javascript:child_toggle({i})\"><span class=\"commentfold\">[-]</span></a>\
+               </div>\
+             <div class=\"commentTD\"><span class=\"comment_contents\">\
+               <p>이 기능은 <strong>정말</strong> 기대되네요. 터미널을 떠나지 않고 작업할 수 있다는 \
+                 점이 특히 좋습니다.</p>\
+               <ul><li>첫째 이유</li><li>둘째 이유</li></ul></span></div></div>"
+        ));
+    }
+    s.push_str("</div></article></main></body></html>");
+    s
+}
+
+/// A GitHub pull request's timeline: events that carry an author and a time but no authored prose.
+///
+/// `added 3 commits` and `mentioned this pull request` cleared every gate a comment clears — an event
+/// has a byline exactly as a comment does — and three of them outnumbered the real conversation, so
+/// commit records were reported as comments. Plan §1.7 S-6 calls them `Boilerplate`; the signal that
+/// separates them is that nobody wrote a paragraph.
+fn timeline_events() -> String {
+    let mut s = String::from(
+        "<html><head><title>perf(hub): reuse datasource connections by selenehyun · Pull Request \
+         #39</title></head><body><main>\
+         <div class=\"comment-body\"><h1>perf(hub): reuse datasource connections</h1>\
+         <p>queryDatabase builds a datasource and closes it again on every sync, which costs a \
+           connection handshake per source per interval.</p>\
+         <p>This reuses a pooled datasource keyed by type and config, and closes it when the last \
+           borrower returns it.</p></div>\
+         <div id=\"timeline\">",
+    );
+    for (i, (verb, hash)) in [("added 3 commits", "8918818"), ("added 2 commits", "8b85ec7")]
+        .iter()
+        .enumerate()
+    {
+        s.push_str(&format!(
+            "<div class=\"TimelineItem\" id=\"event-{i}\">\
+             <a href=\"/selenehyun\">selenehyun</a> <span>and others</span> {verb} \
+             <a href=\"#commits-pushed-{hash}\"><time datetime=\"2026-08-05T12:4{i}:50+09:00\">\
+               August 5, 2026</time></a>\
+             <div class=\"commits\"><pre><code>{hash}</code></pre>\
+               <a href=\"/commit/{hash}\">perf(lynqhub): reuse datasource connections across \
+                 syncs</a></div></div>"
+        ));
+    }
+    s.push_str(
+        "<div class=\"TimelineItem\" id=\"event-2\">\
+         <a href=\"/selenehyun\">selenehyun</a> mentioned this pull request \
+         <a href=\"#ref-1\"><time datetime=\"2026-08-05T07:09:53Z\">Aug 5, 2026</time></a>\
+         <div><a href=\"/pull/41\">fix(lynqhub): decide rollout skew on API state</a>\
+           <span>#41</span><span>Merged</span></div></div>\
+         </div></main></body></html>",
+    );
+    s
+}
+
+/// Navigation *inside* `<main>`, which is where an application-shaped page puts it.
+///
+/// GitHub's repository bar and tab strip live under the same `<main>` as the pull request, so the
+/// extracted body opened with `Code Issues 4 Pull requests 3 … Conversation Commits Checks`. A
+/// `<nav>` is the page saying it is navigation. The repository bar carries no landmark at all and is
+/// caught by name plus structure instead — its id contains `header`, it holds no paragraph, and it is
+/// almost entirely links.
+fn nav_inside_main() -> String {
+    "<html><head><title>Reuse datasource connections · Pull Request #39</title></head><body>\
+     <main>\
+     <div id=\"repository-container-header\"><ul>\
+       <li><a href=\"/notifications\">Notifications</a></li>\
+       <li><a href=\"/fork\">Fork 6</a></li>\
+       <li><a href=\"/stargazers\">Star 78</a></li></ul></div>\
+     <nav aria-label=\"Repository\"><a href=\"/code\">Code</a><a href=\"/issues\">Issues 4</a>\
+       <a href=\"/pulls\">Pull requests 3</a><a href=\"/actions\">Actions</a>\
+       <a href=\"/insights\">Insights</a></nav>\
+     <nav aria-label=\"Pull request tabs\"><a href=\"#conv\">Conversation</a>\
+       <a href=\"#commits\">Commits</a><a href=\"#checks\">Checks</a>\
+       <a href=\"#files\">Files changed</a></nav>\
+     <div class=\"comment-body\">\
+       <p>queryDatabase builds a datasource and closes it again on every sync, which costs a full \
+         connection handshake per source per interval.</p>\
+       <p>This change reuses a pooled datasource keyed by type and config, and closes it only when \
+         the last borrower gives it back.</p></div>\
+     <footer><a href=\"/terms\">Terms</a><a href=\"/privacy\">Privacy</a></footer>\
      </main></body></html>"
         .to_string()
 }

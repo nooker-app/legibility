@@ -1,5 +1,6 @@
 {
   "schema_version":1,
+  "url":null,
   "article":{
     "html":"<main><div><p>I'm very new to RSS and just started setting up apps (Feeder)</p><p>I follow football closely and wanted to make a list, but I can't seem to add this website for some reason. Any help would be great.</p><p><a href=\"https://www.example.test/es/\">https://www.example.test/es/</a></p></div></main>",
     "text":"I'm very new to RSS and just started setting up apps (Feeder) I follow football closely and wanted to make a list, but I can't seem to add this website for some reason. Any help would be great. https://www.example.test/es/",
@@ -16,6 +17,7 @@
     "signal_conflict":false,
     "calibrated":false
   },
+  "no_article":null,
   "comments":{
     "count":0,
     "depth_source":null,

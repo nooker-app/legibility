@@ -75,6 +75,22 @@ pub struct CommentItem {
     pub timestamp: Option<String>,
     /// Prose text, with control and hidden text already excluded.
     pub text: String,
+    /// The subtree holding the comment's *content*, as opposed to its byline and controls.
+    ///
+    /// Named so the serializer can emit formatted HTML for a comment without re-deciding what a
+    /// comment is. Comments arrive with structure — lists, code blocks, quotes, emphasis, headings —
+    /// and until now only [`Self::text`] existed, so every consumer rendered a flattened paragraph
+    /// and the formatting looked stripped. It was never extracted.
+    ///
+    /// `None` when nothing under the item carries prose outside its byline.
+    pub body: Option<NodeId>,
+    /// Nodes the author and the timestamp were read from.
+    ///
+    /// Handed to the serializer so it can leave them out of [`Self::body`] without having to decide
+    /// again what a byline is. They are already returned as [`Self::author`] and [`Self::timestamp`],
+    /// and when [`Self::body`] is the whole comment — which it is whenever the content is spread over
+    /// sibling blocks — the byline sits inside it and would be rendered a second time.
+    pub byline: Vec<NodeId>,
     /// Depth in the thread; 0 is top level.
     pub depth: u16,
     /// Index into [`CommentSet::items`] of the parent, if any.
@@ -230,6 +246,7 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         }
     }
 
+    let body = content_child(arena, m, end, &[author_node, time_node]);
     let text = subtree_prose_excluding(arena, m, &[author_node, time_node]);
     let lower_owned = text.to_lowercase();
     let lower = lower_owned.as_str();
@@ -246,6 +263,8 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         node: m,
         author,
         timestamp,
+        body,
+        byline: byline_and_furniture(arena, m, end, body, &[author_node, time_node]),
         text,
         depth: 0,
         parent: None,
@@ -254,6 +273,106 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         kind: CommentKind::Reply,
         flags,
     }
+}
+
+/// The child of a comment holding its content rather than its byline or its controls.
+///
+/// The widest-prose direct child that contains neither the author nor the timestamp. Every template
+/// in the corpus separates the two — `GeekNews` has `div.commentinfo` beside `div.commentTD`, Reddit a
+/// meta slot beside a body slot — because the byline is laid out differently from the prose. Picking
+/// by prose alone would also work on most pages and would pick the byline on a one-line reply, which
+/// is exactly where it matters least and is wrong most visibly.
+///
+/// Returns `None` rather than guessing when no child qualifies.
+fn content_child(
+    arena: &Arena,
+    item: NodeId,
+    end: usize,
+    meta: &[Option<NodeId>],
+) -> Option<NodeId> {
+    // Descend through single-child wrappers first. A member is often the row rather than the comment
+    // -- `<li class="comment-tree-item"><article>…</article></li>` -- and looking only at the row's
+    // own children finds one child that holds the byline, gives up, and falls back to the whole row.
+    // The byline is then rendered twice: once as `author`/`timestamp`, once inside `html`.
+    let mut item = item;
+    let mut end = end;
+    loop {
+        let kids: alloc::vec::Vec<usize> = element_children_of(arena, item.idx(), end);
+        match kids.as_slice() {
+            [only] => {
+                item = NodeId(*only as u32);
+                end = (arena.subtree_end.get(*only).copied().unwrap_or(0) as usize).max(only + 1);
+            }
+            _ => break,
+        }
+    }
+
+    // One content child means that child *is* the comment, and returning it drops the wrapper's own
+    // furniture. Several means the content is spread across siblings, and the only node that holds
+    // all of them is the container — the caller excludes the byline from it.
+    let content: alloc::vec::Vec<usize> = element_children_of(arena, item.idx(), end)
+        .into_iter()
+        .filter(|&c| {
+            let child_end = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
+            let holds_meta = meta.iter().flatten().any(|n| n.idx() >= c && n.idx() < child_end);
+            !holds_meta
+                && arena.prose_len.get(c).copied().unwrap_or(0) > 0
+                && !is_control_furniture(arena, NodeId(c as u32))
+        })
+        .collect();
+    match content.as_slice() {
+        [only] => Some(NodeId(*only as u32)),
+        [] => None,
+        _ => Some(item),
+    }
+}
+
+/// Whether a child of a comment is a control strip rather than content.
+///
+/// A vote arrow and a fold toggle are `<a>` elements — `<a class="upvote">▲</a>`,
+/// `<a href="javascript:child_toggle(1)"><span>[-]</span></a>` — so they are prose by role and their
+/// text is otherwise indistinguishable from a one-word reply. What gives them away is that *all* of
+/// their text sits inside links: nobody writes a comment that is entirely anchor text.
+fn is_control_furniture(arena: &Arena, node: NodeId) -> bool {
+    arena.link_density(node) > 0.9
+}
+
+/// Everything the serializer must leave out of a comment's body.
+///
+/// The author and timestamp nodes always, because they are returned as their own fields. Plus, when
+/// the body is the whole comment rather than one content child, the control strips beside it — the
+/// vote arrow and the fold toggle would otherwise open every rendered comment with `▲ [-]`.
+fn byline_and_furniture(
+    arena: &Arena,
+    item: NodeId,
+    end: usize,
+    body: Option<NodeId>,
+    meta: &[Option<NodeId>],
+) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = meta.iter().flatten().copied().collect();
+    if body != Some(item) {
+        return out;
+    }
+    for c in element_children_of(arena, item.idx(), end) {
+        let id = NodeId(c as u32);
+        if arena.prose_len.get(c).copied().unwrap_or(0) > 0 && is_control_furniture(arena, id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// Indices of an element's direct element children.
+fn element_children_of(arena: &Arena, parent: usize, end: usize) -> alloc::vec::Vec<usize> {
+    let mut out = alloc::vec::Vec::new();
+    let mut c = parent + 1;
+    while c < end {
+        if arena.kind.get(c).copied() == Some(NodeKind::Element) {
+            out.push(c);
+        }
+        c = (arena.subtree_end.get(c).copied().unwrap_or(0) as usize).max(c + 1);
+    }
+    out
 }
 
 /// Prose text of a subtree. Control, hidden and screen-reader text are already excluded by role, so
@@ -342,18 +461,27 @@ fn resolve_depths(arena: &Arena, group: &Group, n: usize) -> (Vec<u16>, DepthSou
         return (from_css, DepthSource::CssVariable);
     }
 
-    // 2. Nesting of members inside one another.
+    // 2. Nesting of members inside one another, in one linear pass with a stack of open ancestors.
+    //
+    // The obvious form asks, for each member, how many other members contain it — a members x
+    // members product, and every comparison a `contains` call. On a 30,000-comment thread that was
+    // 530 ms of a 559 ms pipeline. Members arrive in document order and containment is a
+    // `subtree_end` range test, so an ancestor is simply an earlier member whose subtree has not
+    // closed yet: keep those on a stack, pop the ones that have closed, and the depth is the stack
+    // height. Same answer, O(members).
     let mut from_dom = Vec::with_capacity(members.len());
     let mut any_nested = false;
+    let mut open: Vec<u32> = Vec::new();
     for &m in members {
-        let d = members
-            .iter()
-            .filter(|&&o| o != m && contains(arena, o, m))
-            .count();
+        while open.last().is_some_and(|&e| m.0 >= e) {
+            open.pop();
+        }
+        let d = open.len();
         if d > 0 {
             any_nested = true;
         }
         from_dom.push(u16::try_from(d).unwrap_or(u16::MAX));
+        open.push(arena.subtree_end.get(m.idx()).copied().unwrap_or(m.0 + 1));
     }
     if any_nested {
         return (from_dom, DepthSource::DomNesting);
@@ -483,11 +611,6 @@ fn smallest_positive_gap(v: &[u32]) -> u32 {
     }
 }
 
-fn contains(arena: &Arena, outer: NodeId, inner: NodeId) -> bool {
-    let end = arena.subtree_end.get(outer.idx()).copied().unwrap_or(0) as usize;
-    inner.idx() > outer.idx() && inner.idx() < end
-}
-
 /// Assign each item the nearest preceding item of lower depth.
 ///
 /// Iterative with an explicit stack of (depth, index). This is the standard way to rebuild a tree
@@ -519,6 +642,11 @@ fn link_parents(set: &mut CommentSet) {
 pub fn claimed_total(arena: &Arena) -> Option<u32> {
     (0..arena.len())
         .filter(|&i| arena.kind.get(i).copied() == Some(NodeKind::Text))
+        // Script and stylesheet source is `Inert`, and it is usually the largest text in the
+        // document. Handing it to the parser below made this scan 72% of the whole pipeline on a
+        // measured page — it cannot contain a rendered comment count by definition, since nothing
+        // in it is rendered at all.
+        .filter(|&i| arena.text_role.get(i).copied() != Some(crate::a11y::TextRole::Inert))
         .find_map(|i| parse_claimed_total(arena.own_text(NodeId(i as u32))))
 }
 
@@ -529,6 +657,14 @@ pub fn claimed_total(arena: &Arena) -> Option<u32> {
 #[must_use]
 pub fn parse_claimed_total(text: &str) -> Option<u32> {
     const MARKERS: [&str; 5] = ["comment", "댓글", "コメント", "评论", "replies"];
+    // Cheap reject before the allocation. Only `comment` and `replies` are case-sensitive at all —
+    // the CJK markers have no case — so a page with no ASCII `c`/`r` and none of the three CJK
+    // markers cannot match, and that is almost every text node on almost every page.
+    if !text.bytes().any(|b| matches!(b, b'c' | b'C' | b'r' | b'R'))
+        && !MARKERS[1..4].iter().any(|m| text.contains(m))
+    {
+        return None;
+    }
     let lower = text.to_lowercase();
     for marker in MARKERS {
         let mut from = 0usize;
@@ -605,6 +741,8 @@ mod tests {
         let mut set = CommentSet::default();
         for d in [0u16, 1, 2, 1, 0, 1] {
             set.items.push(CommentItem {
+                byline: Vec::new(),
+                body: None,
                 node: NodeId(0),
                 author: None,
                 timestamp: None,
@@ -641,6 +779,8 @@ mod tests {
         let mut set = CommentSet::default();
         for (d, t) in [(0u16, "top"), (1, ""), (2, "reply to deleted")] {
             set.items.push(CommentItem {
+                byline: Vec::new(),
+                body: None,
                 node: NodeId(0),
                 author: None,
                 timestamp: None,

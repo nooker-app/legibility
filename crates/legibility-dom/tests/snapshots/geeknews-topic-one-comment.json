@@ -1,0 +1,107 @@
+{
+  "schema_version":1,
+  "url":null,
+  "article":{
+    "html":"<section><ul><li>Warp Terminal의 다중 모델 코딩 에이전트를 <strong>독립형 CLI</strong>로 제공해 다른 터미널에서도 사용할 수 있음</li><li>tmux와 유사한 <strong>멀티플렉싱 구조</strong>로 PTY 연결을 관리함</li></ul><h2>선호하는 터미널에서 실행하는 독립형 에이전트</h2><p>전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 라우팅을 기본 제공함</p></section>",
+    "text":"Warp Terminal의 다중 모델 코딩 에이전트를 독립형 CLI 로 제공해 다른 터미널에서도 사용할 수 있음 tmux와 유사한 멀티플렉싱 구조 로 PTY 연결을 관리함 선호하는 터미널에서 실행하는 독립형 에이전트 전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 라우팅을 기본 제공함",
+    "tag":"section",
+    "kind":"article",
+    "url":null,
+    "prose_len":393,
+    "confidence":6027,
+    "dropped_subtrees":0,
+    "unwrapped":0,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "no_article":null,
+  "comments":{
+    "count":0,
+    "depth_source":null,
+    "completeness":{
+      "present":0,
+      "claimed_total":1,
+      "truncated":true,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"Warp Agent CLI",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        176,
+        190
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":{
+      "value":"GeekNews",
+      "source":"open-graph",
+      "confidence":85,
+      "span":[
+        37,
+        45
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":{
+      "candidate":{
+        "value":"2026-08-05T22:05:33+09:00",
+        "source":"time-element",
+        "confidence":75,
+        "span":[
+          235,
+          260
+        ],
+        "transforms":[
+          "EntityDecodedByParser"
+        ],
+        "verbatim_ok":true
+      },
+      "raw":"2026-08-05T22:05:33+09:00",
+      "iso8601":"2026-08-05T22:05:33+09:00",
+      "tz_known":true
+    },
+    "modified":null,
+    "candidate_count":5
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":1,
+  "diagnostics":{
+    "node_count":107,
+    "page_prose_len":823,
+    "page_control_len":0,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":25,
+    "discussion_shape":null,
+    "limits_hit":[
+      
+    ]
+  }
+}

@@ -11,7 +11,7 @@
 use legibility_core::comments::CommentSet;
 use legibility_core::meta::{Candidate, DateValue, Metadata};
 use legibility_core::{Arena, LimitsHit, NodeId, NodeKind, Outcome, TagId};
-use legibility_sanitize::Article;
+use legibility_sanitize::{Article, UserContent};
 
 use crate::serialize::{serialize_region_excluding, SerializeOptions};
 
@@ -25,10 +25,34 @@ pub fn extraction_json(
     hit: LimitsHit,
     url: Option<&str>,
 ) -> String {
+    extraction_json_limited(arena, out, hit, url, legibility_core::Limits::DEFAULT)
+}
+
+/// [`extraction_json`] honouring a caller's [`Limits`].
+///
+/// `max_output_bytes` was declared, documented per host profile — 4 MiB in a browser, 2 MiB in an
+/// iOS share extension, chosen because "a Share Extension is killed for memory far sooner than its
+/// host app" — and never read by anything. Every serialization used
+/// [`SerializeOptions::default`]'s 16 MiB, so both host caps were decoration and
+/// `LimitsHit::output_bytes` could never become true. A limit nobody enforces is worse than no
+/// limit: a caller reads it and plans around a bound that is not there.
+#[must_use]
+pub fn extraction_json_limited(
+    arena: &Arena,
+    out: &Outcome,
+    hit: LimitsHit,
+    url: Option<&str>,
+    limits: legibility_core::Limits,
+) -> String {
+    let opts = SerializeOptions {
+        max_output_bytes: limits.max_output_bytes,
+        ..SerializeOptions::default()
+    };
     let mut s = String::from("{\"schema_version\":1");
-    if let Some(u) = url {
-        s.push_str(",\"url\":");
-        push_str(&mut s, u);
+    s.push_str(",\"url\":");
+    match url {
+        Some(u) => push_str(&mut s, u),
+        None => s.push_str("null"),
     }
 
     s.push_str(",\"article\":");
@@ -51,12 +75,7 @@ pub fn extraction_json(
             let ser = if root {
                 None
             } else {
-                Some(serialize_region_excluding::<Article>(
-                    arena,
-                    n,
-                    SerializeOptions::default(),
-                    comment_nodes,
-                ))
+                Some(serialize_region_excluding::<Article>(arena, n, opts, comment_nodes))
             };
             let rep = ser.as_ref().map_or_else(Default::default, |(_, r)| *r);
             s.push_str("{\"html\":");
@@ -135,13 +154,17 @@ pub fn extraction_json(
         }
         None => s.push_str("null"),
     }
-    if let Some(r) = out.selection.no_article {
-        s.push_str(",\"no_article\":");
-        push_str(&mut s, &alloc_fmt(r));
+    // Always emitted, `null` when absent. A key that appears only on some outcomes makes the object
+    // a different shape per page, which every strict consumer -- and the snapshot suite -- has to
+    // special-case. `article` was already unconditional; its counterpart was not.
+    s.push_str(",\"no_article\":");
+    match out.selection.no_article {
+        Some(r) => push_str(&mut s, &alloc_fmt(r)),
+        None => s.push_str("null"),
     }
 
     s.push_str(",\"comments\":");
-    s.push_str(&comments_json(&out.comments));
+    s.push_str(&comments_json(arena, &out.comments, opts));
     s.push_str(",\"metadata\":");
     s.push_str(&metadata_json(arena, &out.metadata));
 
@@ -201,7 +224,7 @@ pub fn extraction_json(
     s
 }
 
-fn comments_json(set: &CommentSet) -> String {
+fn comments_json(arena: &Arena, set: &CommentSet, opts: SerializeOptions) -> String {
     let mut s = String::from("{\"count\":");
     s.push_str(&set.items.len().to_string());
     s.push_str(",\"depth_source\":");
@@ -265,6 +288,24 @@ fn comments_json(set: &CommentSet) -> String {
         s.push_str(if it.flags.deleted { "true" } else { "false" });
         s.push_str(",\"text\":");
         push_str(&mut s, &it.text);
+        // Formatted HTML, through the *UserContent* profile. Comments arrive with lists, quotes,
+        // code blocks and emphasis, and only `text` existed until now -- so every consumer rendered
+        // a flattened paragraph and the formatting read as stripped when it had never been emitted.
+        //
+        // `UserContent` and not `Article`: this is attacker-controlled input (plan §1.8), and the
+        // phantom type on `SanitizedHtml<P>` is what stops it being rendered down an article path.
+        // Images are off, media is dropped, and every surviving link gets
+        // `rel="nofollow noopener noreferrer"`.
+        s.push_str(",\"html\":");
+        match it.body.or(Some(it.node)) {
+            Some(n) => {
+                // The byline is excluded, not because it is unsafe but because it is already
+                // `author` and `timestamp`: when `body` is the whole comment it would render twice.
+                let (h, _) = serialize_region_excluding::<UserContent>(arena, n, opts, &it.byline);
+                push_str(&mut s, h.as_str());
+            }
+            None => s.push_str("null"),
+        }
         s.push('}');
     }
     s.push(']');
