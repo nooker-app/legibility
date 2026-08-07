@@ -78,9 +78,14 @@ checks = [
     ("an article was selected", d.get("article") is not None),
     ("comments were found", (d.get("comments") or {}).get("count", 0) > 0),
     ("stage reports static", 'id="stage"' in s and "static" in (re.search(r'id="stage"[^>]*>(.*?)<', s) or ["", ""])[1]),
-    ("URL row hidden", attr_hidden("urlrow")),
+    # URL input is offered on a static deploy now: it tries the site directly and falls back to a
+    # CORS proxy. What must stay true is that the helper-only control is gone, the proxy is
+    # *visible and editable* rather than silent, and the page says the proxy sees the address.
+    ("URL row offered", not attr_hidden("urlrow")),
     ("helper-port row hidden", attr_hidden("portrow")),
-    ("the reason is stated on the page", "URL input is not offered" in note),
+    ("proxy row offered", not attr_hidden("proxyrow")),
+    ("the proxy is disclosed on the page", "proxy sees the address" in note),
+    ("extraction is still local", "never leaves it" in note),
     # The rendered panel, not the file: the phrase "could not load" appears in the inlined script's
     # own error string, so searching the whole DOM for it fails on a page that worked perfectly.
     ("the article panel holds no error", 'class="err"' not in (re.search(r'<div id="article">(.*?)</div>\s*<h2', s, re.S) or ["", ""])[1]),

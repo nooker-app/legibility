@@ -89,16 +89,19 @@ else
   say PASS "no corpus HTML in the bundle (D9)"
 fi
 
-# 6. URL input must be absent on a static deploy, and the page must say why.
+# 6. A static deploy has no helper, so URL input must not silently call this host looking for one,
+#    and the proxy it does use must be visible rather than hard-wired out of sight.
 #
 #    Presence of the mechanism only. The *behaviour* is asserted by scripts/verify-pages-demo.sh,
 #    which serves the bundle under a path prefix and drives a real browser -- a grep cannot tell
 #    whether a branch runs, and an earlier version of this comment cited that script before it
 #    existed, which made a tautology look like it was backed by something.
-if grep -q 'const STATIC' "$DIST/index.html" && grep -q 'id="urlrow"' "$DIST/index.html"; then
-  say PASS "static-deploy detection and the hideable URL row are both present"
+if grep -q 'const STATIC' "$DIST/index.html" \
+   && grep -q 'id="urlrow"' "$DIST/index.html" \
+   && grep -q 'id="proxy"' "$DIST/index.html"; then
+  say PASS "static-deploy detection, the URL row and an editable proxy are all present"
 else
-  say FAIL "the STATIC branch or #urlrow is gone; URL input would call Pages itself"
+  say FAIL "the STATIC branch, #urlrow or the proxy field is gone"
   fail=1
 fi
 

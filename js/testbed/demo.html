@@ -85,6 +85,12 @@
       <input type="number" id="port" value="8899" min="1" max="65535">
       <span class="note">URL fetching goes through <code>lgb serve</code> on your own machine.</span>
     </div>
+    <div class="row" id="proxyrow" hidden>
+      <label class="note" for="proxy">CORS proxy</label>
+      <input type="text" id="proxy" spellcheck="false"
+             value="https://api.allorigins.win/raw?url= https://cors.eu.org/">
+      <span class="note">Tried in order, after the site itself. Empty this for direct only.</span>
+    </div>
     <textarea id="html" spellcheck="false" placeholder="…or paste HTML here"></textarea>
     <div id="drop">drop a <code>.html</code> file, or <button id="pick">choose a file</button></div>
     <input type="file" id="file" accept=".html,.htm,text/html" hidden>
@@ -154,8 +160,9 @@ const $ = (id) => document.getElementById(id);
 // -- `helperBase()` returns "" for http(s) -- and loads a 404 page into the textarea. The control
 // must be gone because the helper cannot exist, which is true before any module is loaded.
 if (STATIC) {
-  $("urlrow").hidden = true;
+  // The helper cannot exist here, so its port field goes. The URL field stays — see `runUrl`.
   $("portrow").hidden = true;
+  $("proxyrow").hidden = false;
 }
 
 function b64ToBytes(b64) {
@@ -191,10 +198,10 @@ async function initWasm() {
     `<tr><td>extraction</td><td>in this page, always</td></tr>`;
   $("stage").textContent = STATIC ? "static · wasm" : EMBEDDED ? "single file · wasm" : "lgb serve · wasm";
   $("urlnote").innerHTML = STATIC
-    ? 'Everything here runs in your browser. <strong>URL input is not offered</strong>: a page ' +
-      'cannot fetch another site (CORS), and the only ways around that are a server we will not ' +
-      'run or a third-party proxy we will not send your reading through. Paste HTML, or save a ' +
-      'page (⌘S) and drop the file in.'
+    ? 'Extraction happens in your browser and never leaves it. <strong>Fetching a URL is the one ' +
+      'exception</strong>: a page cannot read another site unless that site allows it, so this ' +
+      'tries the site directly first and falls back to the CORS proxy shown below — which means ' +
+      'that proxy sees the address you asked for. Pasting HTML or dropping a file involves nobody.'
     : EMBEDDED
     ? 'Opened from disk. Everything except URL fetching needs nothing at all; for a URL, run ' +
       '<code>lgb serve</code> and this page will ask it to fetch — your machine only, no third party.'
@@ -429,29 +436,95 @@ function helperBase() {
   return `http://127.0.0.1:${port}`;
 }
 
+// A page cannot fetch another origin unless that origin allows it, and news sites do not. From
+// `file://` or under `lgb serve` there is a process on your own machine to ask, which is the honest
+// answer and the one this demo prefers. On a static deploy there is no such process, so the choice
+// is between a third party and nothing.
+//
+// Direct first: it costs one failed request and it is free of anyone else when it works — some
+// sites, and every raw file host, do send `Access-Control-Allow-Origin: *`. Only when that fails
+// does the proxy get the URL, and the page says so rather than routing quietly.
+async function fetchWithoutHelper(url) {
+  // Direct first. It costs one failed request and involves nobody when it works, which is the case
+  // for any host that sends `Access-Control-Allow-Origin` — raw file hosts, many APIs, some blogs.
+  try {
+    const res = await fetch(url, { redirect: "follow" });
+    if (res.ok) return await res.text();
+  } catch (_) {
+    // A CORS rejection is deliberately indistinguishable from a network error here. Either way the
+    // next step is the same.
+  }
+
+  // Then each proxy in turn. A list rather than one entry because free proxies are individually
+  // unreliable — measured while building this: `api.allorigins.win` answered 500 for minutes at a
+  // time and then served the same URL correctly, and `corsproxy.io` now refuses anything but a paid
+  // plan. One name in this field would make the feature look broken whenever that one name was down.
+  const proxies = $("proxy").value.split(/[\s,]+/).filter(Boolean);
+  const failures = [];
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy + joinTarget(proxy, url));
+      const body = await res.text();
+      if (res.ok && body.trim()) return body;
+      failures.push(`${host(proxy)}: HTTP ${res.status}`);
+    } catch (e) {
+      failures.push(`${host(proxy)}: ${e.message || e}`);
+    }
+  }
+
+  // Worth being precise about, because the usual cause is not our end. A proxy fetches from a data
+  // centre with its own user agent, and plenty of sites answer that with a 403 while serving a
+  // browser normally — `news.hada.io` is one. No proxy can get past that, and saying "failed to
+  // fetch" would send someone hunting for a bug that is not there.
+  throw new Error(
+    (proxies.length
+      ? `The site refused every route:\n  ${failures.join("\n  ")}\n\nMany sites block proxies ` +
+        `outright while serving browsers normally, and no proxy can get past that.`
+      : "That site does not allow other pages to read it (CORS), and no proxy is set.")
+  );
+}
+
+// The two shapes a CORS proxy comes in. `…/raw?url=` takes the target as a query parameter and
+// therefore percent-encoded; `https://cors.eu.org/` takes it appended as a path and breaks if it is
+// encoded. Encoding both ways round was tried and silently returned the proxy's own error page.
+function joinTarget(proxy, url) {
+  return proxy.endsWith("=") ? encodeURIComponent(url) : url;
+}
+
+// Host of a URL, for an error message that names which proxy failed rather than a whole URL.
+function host(u) {
+  try {
+    return new URL(u).host;
+  } catch (_) {
+    return u.slice(0, 40);
+  }
+}
+
+async function fetchViaHelper(url) {
+  const res = await fetch(`${helperBase()}/fetch?url=${encodeURIComponent(url)}`);
+  const body = await res.text();
+  if (!res.ok) throw new Error(body.trim() || `helper returned ${res.status}`);
+  return body;
+}
+
 async function runUrl() {
   // The one guard that matters on a static deploy, placed at the entry point rather than on the
   // button: `#url=` reaches this function directly, so hiding the control is not enough.
-  if (STATIC) {
-    $("article").innerHTML =
-      '<p class="err">URL fetching needs a helper on your own machine, and there is none here. ' +
-      'Paste the HTML, or save the page and drop the file in.</p>';
-    return;
-  }
   const url = $("url").value.trim();
   if (!url) return;
   for (const b of [$("go"), $("go-url")]) b.disabled = true;
   $("article").innerHTML = '<p class="note">fetching…</p>';
   try {
-    const res = await fetch(`${helperBase()}/fetch?url=${encodeURIComponent(url)}`);
-    const body = await res.text();
-    if (!res.ok) throw new Error(body.trim() || `helper returned ${res.status}`);
-    $("html").value = body;
+    $("html").value = STATIC ? await fetchWithoutHelper(url) : await fetchViaHelper(url);
     run();
   } catch (e) {
-    const hint = EMBEDDED
-      ? `\n\nStart the helper with:  lgb serve --port ${Number($("port").value) || 8899}`
-      : "";
+    // The remedy differs by where the page is running, and naming the wrong one is how a user ends
+    // up trying to start a local helper for a page served from the internet.
+    const hint = STATIC
+      ? "\n\nOr save the page (⌘S) and drop the file in — that needs nothing and nobody."
+      : EMBEDDED
+        ? `\n\nStart the helper with:  lgb serve --port ${Number($("port").value) || 8899}`
+        : "";
     $("article").innerHTML = `<p class="err">${esc((e.message || e) + hint)}</p>`;
   } finally {
     for (const b of [$("go"), $("go-url")]) b.disabled = false;
