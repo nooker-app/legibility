@@ -137,22 +137,14 @@ fn body_as_last_resort(arena: &Arena, masked_prose: &[u32]) -> Vec<Candidate> {
         return Vec::new();
     };
     let masked = masked_prose.get(body).copied().unwrap_or(0);
-    let prose = arena
-        .prose_len
-        .get(body)
-        .copied()
-        .unwrap_or(0)
-        .saturating_sub(masked);
+    let prose = arena.prose_len.get(body).copied().unwrap_or(0).saturating_sub(masked);
     if prose == 0 {
         return Vec::new();
     }
     let control = arena.control_len.get(body).copied().unwrap_or(0);
     let hidden = arena.hidden_len.get(body).copied().unwrap_or(0);
     let alt = arena.alt_len.get(body).copied().unwrap_or(0);
-    let all_text = prose
-        .saturating_add(control)
-        .saturating_add(hidden)
-        .saturating_add(alt);
+    let all_text = prose.saturating_add(control).saturating_add(hidden).saturating_add(alt);
     let node = NodeId(body as u32);
     let link_density = arena.link_density(node).clamp(0.0, 1.0);
     let purity = guarded_div(prose as f32, all_text as f32);
@@ -195,12 +187,7 @@ pub fn collect_masked(arena: &Arena, masked_prose: &[u32]) -> (Vec<Candidate>, P
         }
         let node = NodeId(i as u32);
         let masked = masked_prose.get(i).copied().unwrap_or(0);
-        let prose = arena
-            .prose_len
-            .get(i)
-            .copied()
-            .unwrap_or(0)
-            .saturating_sub(masked);
+        let prose = arena.prose_len.get(i).copied().unwrap_or(0).saturating_sub(masked);
         if prose == 0 {
             continue;
         }
@@ -208,10 +195,7 @@ pub fn collect_masked(arena: &Arena, masked_prose: &[u32]) -> (Vec<Candidate>, P
         let control = arena.control_len.get(i).copied().unwrap_or(0);
         let hidden = arena.hidden_len.get(i).copied().unwrap_or(0);
         let alt = arena.alt_len.get(i).copied().unwrap_or(0);
-        let all_text = prose
-            .saturating_add(control)
-            .saturating_add(hidden)
-            .saturating_add(alt);
+        let all_text = prose.saturating_add(control).saturating_add(hidden).saturating_add(alt);
 
         let text_share = guarded_div(prose as f32, page_prose as f32);
         let density = arena.text_density(node);
@@ -219,14 +203,7 @@ pub fn collect_masked(arena: &Arena, masked_prose: &[u32]) -> (Vec<Candidate>, P
         let purity = guarded_div(prose as f32, all_text as f32);
         let evidence = text_share * density * (1.0 - link_density) * purity;
 
-        cands.push(Candidate {
-            node,
-            text_share,
-            density,
-            link_density,
-            purity,
-            evidence,
-        });
+        cands.push(Candidate { node, text_share, density, link_density, purity, evidence });
     }
 
     let stats = page_stats(page_prose, &cands);
@@ -361,23 +338,14 @@ const ANCHOR_MIN_PROSE_SHARE: f32 = 0.20;
 /// Of the two microdata spellings only `articleBody` is admitted. `itemprop="description"` and
 /// friends name *fields*, and treating a field as a region is how a meta line becomes an article.
 fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
-    if arena
-        .tag
-        .get(node.idx())
-        .copied()
-        .unwrap_or(TagId::UNKNOWN)
-        .is_positive_landmark()
-    {
+    if arena.tag.get(node.idx()).copied().unwrap_or(TagId::UNKNOWN).is_positive_landmark() {
         return true;
     }
-    if arena
-        .attr(node, crate::arena::AttrName::ITEMPROP)
-        .is_some_and(|p| {
-            // Space-separated token list, per the microdata spec, so `contains` would match
-            // `articleBodyish` and a plain equality test would miss `itemprop="name articleBody"`.
-            p.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("articlebody"))
-        })
-    {
+    if arena.attr(node, crate::arena::AttrName::ITEMPROP).is_some_and(|p| {
+        // Space-separated token list, per the microdata spec, so `contains` would match
+        // `articleBodyish` and a plain equality test would miss `itemprop="name articleBody"`.
+        p.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("articlebody"))
+    }) {
         return true;
     }
     match arena.attr(node, crate::arena::AttrName::ROLE) {
@@ -400,11 +368,8 @@ fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
 ///   guessing between them is how a front page gets returned as a post.
 #[must_use]
 pub fn innermost_anchor(arena: &Arena, viable: &[&Candidate]) -> Option<NodeId> {
-    let anchors: Vec<NodeId> = viable
-        .iter()
-        .map(|c| c.node)
-        .filter(|&n| is_semantic_anchor(arena, n))
-        .collect();
+    let anchors: Vec<NodeId> =
+        viable.iter().map(|c| c.node).filter(|&n| is_semantic_anchor(arena, n)).collect();
     let mut innermost = None;
     for &a in &anchors {
         if anchors.iter().any(|&b| b != a && contains(arena, a, b)) {
@@ -462,11 +427,7 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
 
     // Nothing containerish held prose. Before concluding there is no article, ask whether the
     // article simply *is* `<body>` -- see [`body_as_last_resort`].
-    let cands = if cands.is_empty() {
-        body_as_last_resort(arena, masked_prose)
-    } else {
-        cands
-    };
+    let cands = if cands.is_empty() { body_as_last_resort(arena, masked_prose) } else { cands };
 
     if cands.is_empty() {
         // Zero candidates means no container held any prose at all -- an empty page, an error
@@ -545,10 +506,7 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
 
     // Margin over the runner-up, as a ratio. A ratio rather than a difference so it does not
     // inherit the scale of the evidence values.
-    let runner = ranked
-        .get(1)
-        .and_then(|&(_, i)| cands.get(i))
-        .map_or(0.0, |c| c.evidence);
+    let runner = ranked.get(1).and_then(|&(_, i)| cands.get(i)).map_or(0.0, |c| c.evidence);
     let margin = 1.0 - guarded_div(runner, best.evidence);
 
     let degenerate = stats.competitors < MIN_COMPETITORS || stats.density_iqr <= 0.0;
@@ -605,9 +563,8 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
         }
     }
 
-    let outermost = cands
-        .iter()
-        .all(|c| c.node == chosen.node || !contains(arena, c.node, chosen.node));
+    let outermost =
+        cands.iter().all(|c| c.node == chosen.node || !contains(arena, c.node, chosen.node));
 
     Selection {
         article: Some(chosen.node),

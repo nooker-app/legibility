@@ -10,14 +10,7 @@ use legibility_dom::BuildArena;
 fn selected(html: &str) -> Option<&'static str> {
     let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
     let sel = legibility_core::select_article(&arena);
-    sel.article.and_then(|n| {
-        arena
-            .tag
-            .get(n.idx())
-            .copied()
-            .unwrap_or(TagId::UNKNOWN)
-            .known_name()
-    })
+    sel.article.and_then(|n| arena.tag.get(n.idx()).copied().unwrap_or(TagId::UNKNOWN).known_name())
 }
 
 /// A Reddit post: a title, a body that is one bare link, an inlined module script, and an
@@ -86,10 +79,7 @@ fn many_sibling_articles_are_ambiguous_so_the_statistics_decide() {
     let html = format!("<html><body><main>{}</main></body></html>", card.repeat(10));
     let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
     let sel = legibility_core::select_article(&arena);
-    assert!(
-        !sel.region_from_semantic_anchor,
-        "ten equal anchors is not an anchor signal"
-    );
+    assert!(!sel.region_from_semantic_anchor, "ten equal anchors is not an anchor signal");
 }
 
 #[test]
@@ -108,12 +98,7 @@ fn a_page_whose_only_dense_block_is_link_only_still_finds_its_prose() {
 fn extract(html: &str) -> (String, String, usize) {
     let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
-    let tag = out
-        .selection
-        .article
-        .and_then(|n| arena.tag_name(n))
-        .unwrap_or("none")
-        .to_string();
+    let tag = out.selection.article.and_then(|n| arena.tag_name(n)).unwrap_or("none").to_string();
     let text = out.selection.article.map_or(String::new(), |n| {
         legibility_dom::json::prose_text_excluding(&arena, n, &out.article_exclusions)
     });
@@ -431,7 +416,8 @@ fn indentation_between_tags_does_not_dilute_link_density() {
     // Counting those as prose grew link_density's denominator while its numerator -- the anchor
     // text -- stayed fixed: 0.87 at the <p>, 0.74 three levels up, under the 0.75 viability
     // floor. A bare URL then out-massed the title and the page reported a body it does not have.
-    let html = "<html><body><main>\n  <div slot=\"credit-bar\">\n    <a href=\"/r/rss/\">r/rss</a>\n \
+    let html =
+        "<html><body><main>\n  <div slot=\"credit-bar\">\n    <a href=\"/r/rss/\">r/rss</a>\n \
         <time>2d ago</time>\n  </div>\n  <h1>[Github] Free news APIs differ significantly in \
         historical coverage, languages and search filters</h1>\n  <shreddit-post-text-body>\n    \
         <div>\n      <div>\n        <div>\n          <p>\n            [<a \
@@ -517,10 +503,7 @@ fn a_heading_that_only_repeats_the_title_is_dropped_but_a_differing_one_is_kept(
         <p>The body itself, long enough to carry this region past anything else here.</p>\
         </article></main></body></html>";
     let (_, text3, _) = extract(suffixed);
-    assert!(
-        !text3.contains("New to RSS here"),
-        "a title suffix hid the duplication: {text3}"
-    );
+    assert!(!text3.contains("New to RSS here"), "a title suffix hid the duplication: {text3}");
     assert!(text3.contains("The body itself"), "the body was lost: {text3}");
 }
 
@@ -638,7 +621,8 @@ fn a_label_beside_the_headline_goes_but_never_the_body_with_it() {
     // Removing a duplicate `<h1>` leaves its siblings behind, and on a discussion page a sibling is
     // a category chip: beebs.hada.io put `질문` at the top of every extracted body. Two characters,
     // which is why it survived several rounds of that page being reported.
-    let chip = "<html><head><title>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</title></head>\
+    let chip =
+        "<html><head><title>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</title></head>\
         <body><main><article>\
         <header><div class=\"title-line\"><span class=\"category-chip\">질문</span>\
           <h1>인앱 브라우저에서 패스키를 지원할 방법은 없는걸까요?</h1></div></header>\
@@ -892,13 +876,8 @@ fn the_host_output_cap_is_actually_enforced() {
     // And the default profile must not truncate the same document, or the cap is just a bug.
     let (arena, hit) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
-    let json = legibility_dom::json::extraction_json_limited(
-        &arena,
-        &out,
-        hit,
-        None,
-        Limits::DEFAULT,
-    );
+    let json =
+        legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, Limits::DEFAULT);
     assert!(json.contains("\"truncated\":false"), "the default profile truncated");
 }
 
@@ -994,17 +973,26 @@ fn no_payload_survives_into_a_comment_body() {
     let (arena, hit) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
     assert_eq!(out.comments.items.len(), PAYLOADS.len(), "not every payload became a comment");
-    let json = legibility_dom::json::extraction_json_limited(
-        &arena,
-        &out,
-        hit,
-        None,
-        Limits::DEFAULT,
-    );
+    let json =
+        legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, Limits::DEFAULT);
     let lower = json.to_lowercase();
     for banned in [
-        "<script", "onerror", "onload=", "onclick", "javascript:", "data:text", "<iframe",
-        "<object", "<embed", "<form", "<input", "<button", "<style", "<svg", "style=", "ping=",
+        "<script",
+        "onerror",
+        "onload=",
+        "onclick",
+        "javascript:",
+        "data:text",
+        "<iframe",
+        "<object",
+        "<embed",
+        "<form",
+        "<input",
+        "<button",
+        "<style",
+        "<svg",
+        "style=",
+        "ping=",
     ] {
         assert!(!lower.contains(banned), "{banned:?} survived into the output");
     }
@@ -1014,7 +1002,9 @@ fn no_payload_survives_into_a_comment_body() {
     }
     // Every surviving link is defanged.
     assert!(
-        !json.contains("<a ") || json.matches("<a ").count() == json.matches("rel=\\\"nofollow noopener noreferrer\\\"").count(),
+        !json.contains("<a ")
+            || json.matches("<a ").count()
+                == json.matches("rel=\\\"nofollow noopener noreferrer\\\"").count(),
         "a comment link came out without the forced rel"
     );
 }

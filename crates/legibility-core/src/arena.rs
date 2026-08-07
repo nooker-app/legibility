@@ -299,10 +299,7 @@ impl Arena {
     /// from and be checked against `doc_buf` later.
     #[must_use]
     pub fn attr_span(&self, n: NodeId, name: AttrName) -> Option<(u32, u32)> {
-        self.attrs_of(n)
-            .iter()
-            .find(|a| a.name == name)
-            .map(|a| (a.value_start, a.value_end))
+        self.attrs_of(n).iter().find(|a| a.name == name).map(|a| (a.value_start, a.value_end))
     }
 
     /// Text of a span in [`Arena::doc_buf`].
@@ -325,7 +322,8 @@ impl Arena {
     /// This node's own text, or `""` if it has none or the id is unknown.
     #[must_use]
     pub fn own_text(&self, n: NodeId) -> &str {
-        let (Some(&s), Some(&e)) = (self.text_start.get(n.idx()), self.text_end.get(n.idx())) else {
+        let (Some(&s), Some(&e)) = (self.text_start.get(n.idx()), self.text_end.get(n.idx()))
+        else {
             return "";
         };
         self.doc_buf.get(s as usize..e as usize).unwrap_or("")
@@ -357,10 +355,7 @@ impl Arena {
             let end = self.text_end.get(i).copied().unwrap_or(0) as usize;
             let raw = end.saturating_sub(start);
             let own = if raw == 0
-                || self
-                    .doc_buf
-                    .get(start..end)
-                    .is_some_and(|s| s.chars().all(char::is_whitespace))
+                || self.doc_buf.get(start..end).is_some_and(|s| s.chars().all(char::is_whitespace))
             {
                 0
             } else {

@@ -38,13 +38,8 @@ const NONE: u32 = u32::MAX;
 /// This lexicon is doing the job external CSS would do. v1 does not parse stylesheets (see
 /// `docs/limits.md`), and these five class names cover the overwhelming majority of
 /// visually-hidden content in the wild.
-const SR_ONLY_CLASSES: [&str; 5] = [
-    "sr-only",
-    "visually-hidden",
-    "visuallyhidden",
-    "screen-reader-text",
-    "assistive-text",
-];
+const SR_ONLY_CLASSES: [&str; 5] =
+    ["sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "assistive-text"];
 
 /// ARIA roles whose subtree text is control text rather than prose.
 const CONTROL_ROLES: [&str; 13] = [
@@ -248,10 +243,7 @@ impl BuildArena {
                         *slot = ai;
                     }
 
-                    let parent = parent_stack
-                        .last()
-                        .copied()
-                        .map_or(NodeId::NONE, NodeId);
+                    let parent = parent_stack.last().copied().map_or(NodeId::NONE, NodeId);
 
                     arena.parent.push(parent);
                     arena.subtree_end.push(ai + 1);
@@ -350,11 +342,7 @@ impl Build {
         for a in attrs {
             let name = legibility_core::arena::AttrName::from_name(a.name.local.as_ref());
             let (vs, ve) = self.push_attr_value(a.value.as_ref(), limits);
-            self.attrs.push(legibility_core::arena::Attr {
-                name,
-                value_start: vs,
-                value_end: ve,
-            });
+            self.attrs.push(legibility_core::arena::Attr { name, value_start: vs, value_end: ve });
             n = n.saturating_add(1);
         }
         (start, n)
@@ -644,12 +632,8 @@ impl TreeSink for BuildArena {
         prev_element: &u32,
         child: NodeOrText<u32>,
     ) {
-        let has_parent = self
-            .inner
-            .borrow()
-            .nodes
-            .get(*element as usize)
-            .is_some_and(|n| n.parent != NONE);
+        let has_parent =
+            self.inner.borrow().nodes.get(*element as usize).is_some_and(|n| n.parent != NONE);
         if has_parent {
             self.append_before_sibling(element, child);
         } else {
@@ -951,7 +935,8 @@ mod tests {
 
     #[test]
     fn hidden_until_found_is_not_hidden() {
-        let (a, _) = parse("<html><body><div hidden=until-found><p>findable</p></div></body></html>");
+        let (a, _) =
+            parse("<html><body><div hidden=until-found><p>findable</p></div></body></html>");
         let d = a.tag.iter().position(|&t| t == TagId::DIV).unwrap();
         assert_eq!(prose_of(&a, d), 8, "until-found content is ordinary collapsed content");
     }
@@ -1095,9 +1080,6 @@ mod tests {
         let (a, _) = parse(tiny);
         let d = div_scores(&a);
         assert_eq!(d.len(), 2);
-        assert!(
-            d[0] > d[1],
-            "a 2-character article must still beat a nav block: {d:?}"
-        );
+        assert!(d[0] > d[1], "a 2-character article must still beat a nav block: {d:?}");
     }
 }

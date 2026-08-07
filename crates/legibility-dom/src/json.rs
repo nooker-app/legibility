@@ -19,12 +19,7 @@ use crate::serialize::{serialize_region_excluding, SerializeOptions};
 ///
 /// `url` is echoed when the caller fetched one, so a saved result records where it came from.
 #[must_use]
-pub fn extraction_json(
-    arena: &Arena,
-    out: &Outcome,
-    hit: LimitsHit,
-    url: Option<&str>,
-) -> String {
+pub fn extraction_json(arena: &Arena, out: &Outcome, hit: LimitsHit, url: Option<&str>) -> String {
     extraction_json_limited(arena, out, hit, url, legibility_core::Limits::DEFAULT)
 }
 
@@ -69,9 +64,8 @@ pub fn extraction_json_limited(
             //
             // So the body is empty by construction and the payload is `url`. Nothing is lost:
             // the title is `metadata.title` and the destination is right there.
-            let root = out
-                .shape
-                .is_some_and(|sh| sh.kind == legibility_core::DiscussionShape::LinkOnly);
+            let root =
+                out.shape.is_some_and(|sh| sh.kind == legibility_core::DiscussionShape::LinkOnly);
             let ser = if root {
                 None
             } else {
@@ -83,11 +77,7 @@ pub fn extraction_json_limited(
             s.push_str(",\"text\":");
             push_str(
                 &mut s,
-                &if root {
-                    String::new()
-                } else {
-                    prose_text_excluding(arena, n, comment_nodes)
-                },
+                &if root { String::new() } else { prose_text_excluding(arena, n, comment_nodes) },
             );
             s.push_str(",\"tag\":");
             push_str(
@@ -121,12 +111,7 @@ pub fn extraction_json_limited(
                 .filter(|c| c.idx() > n.idx() && c.idx() < region_end)
                 .map(|c| arena.prose_len.get(c.idx()).copied().unwrap_or(0))
                 .sum();
-            let net = arena
-                .prose_len
-                .get(n.idx())
-                .copied()
-                .unwrap_or(0)
-                .saturating_sub(excluded);
+            let net = arena.prose_len.get(n.idx()).copied().unwrap_or(0).saturating_sub(excluded);
             // Zero for a link submission, because `text` and `html` are empty. The invariant this
             // field exists to keep is that all three describe the same thing.
             s.push_str(&if root { 0 } else { net }.to_string());

@@ -105,33 +105,23 @@ fn root() -> PathBuf {
 /// Walking all of `crates/` reported STALE for edits to this very file and to
 /// `legibility-cli/tests/`, neither of which is an input to the module. A staleness warning that
 /// fires when nothing relevant changed gets ignored, and then it is not a warning.
-const MODULE_CRATES: [&str; 4] = [
-    "legibility-core",
-    "legibility-dom",
-    "legibility-sanitize",
-    "legibility-wasm",
-];
+const MODULE_CRATES: [&str; 4] =
+    ["legibility-core", "legibility-dom", "legibility-sanitize", "legibility-wasm"];
 
 /// Files outside `crates/` that also change the compiled module.
 ///
 /// A dependency bump or a rustflags change rebuilds the module with no `.rs` touched, and reporting
 /// FRESH then is the same failure in the other direction.
-const MODULE_CONFIG: [&str; 4] = [
-    "Cargo.toml",
-    "Cargo.lock",
-    ".cargo/config.toml",
-    "rust-toolchain.toml",
-];
+const MODULE_CONFIG: [&str; 4] =
+    ["Cargo.toml", "Cargo.lock", ".cargo/config.toml", "rust-toolchain.toml"];
 
 /// Newest modification time among the module's inputs, and which file it was.
 ///
 /// Recursion is banned in the engine (S1) and there is no reason to make a dev tool the exception,
 /// so the walk carries its own stack.
 fn newest_source() -> Option<(std::time::SystemTime, PathBuf)> {
-    let mut stack: Vec<PathBuf> = MODULE_CRATES
-        .iter()
-        .map(|c| root().join("crates").join(c).join("src"))
-        .collect();
+    let mut stack: Vec<PathBuf> =
+        MODULE_CRATES.iter().map(|c| root().join("crates").join(c).join("src")).collect();
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     let mut consider = |p: PathBuf, m: std::time::SystemTime| {
         if best.as_ref().is_none_or(|(b, _)| m > *b) {
@@ -392,10 +382,7 @@ fn fetch(url: &str) -> Result<String, String> {
         .output()
         .map_err(|e| format!("curl not available: {e}"))?;
     if !out.status.success() {
-        return Err(format!(
-            "fetch failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+        return Err(format!("fetch failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
     let raw = String::from_utf8_lossy(&out.stdout).into_owned();
     let (body, status) = match raw.rsplit_once("\n__LGB_HTTP__") {

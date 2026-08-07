@@ -12,8 +12,15 @@ chk "cargo deny check licenses"                  "cargo deny check licenses"
 chk "legibility-core has no html5ever"           "! cargo tree -p legibility-core | grep -q html5ever"
 chk "legibility-core builds for wasm32-unknown"  "cargo build -q --release -p legibility-core --target wasm32-unknown-unknown"
 chk "legibility-core builds for wasm32-wasip1"   "cargo build -q --release -p legibility-core --target wasm32-wasip1"
-chk "iOS reachability: aarch64-apple-ios"        "cargo build -q --release -p legibility-core --target aarch64-apple-ios"
-chk "iOS reachability: aarch64-apple-ios-sim"    "cargo build -q --release -p legibility-core --target aarch64-apple-ios-sim"
+# iOS reachability (plan §1.11.5) needs the Apple linker, so it is a macOS-only leg. Reported as
+# SKIP elsewhere rather than silently dropped: the gate must say which of its checks it did not run,
+# or a green Linux CI reads as "everything passed" when two things were never attempted.
+if [ "$(uname -s)" = "Darwin" ]; then
+  chk "iOS reachability: aarch64-apple-ios"      "cargo build -q --release -p legibility-core --target aarch64-apple-ios"
+  chk "iOS reachability: aarch64-apple-ios-sim"  "cargo build -q --release -p legibility-core --target aarch64-apple-ios-sim"
+else
+  printf '  SKIP  iOS reachability (needs macOS; run locally before a tag)\n'
+fi
 chk "no direct recursion in core"                "python3 scripts/check-no-recursion.py"
 chk "no third-party .html committed (D9)"        "[ \"\$(git ls-files corpus/ | grep -c '\\.html\$')\" = 0 ]"
 chk "extern \"C\" bodies wrapped (S1/§1.11.2)"     "python3 scripts/ffi-audit.py"

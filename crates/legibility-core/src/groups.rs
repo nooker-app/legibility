@@ -339,10 +339,8 @@ fn has_heading(arena: &Arena, node: NodeId, end: usize) -> bool {
 #[must_use]
 pub fn members_by_identity(arena: &Arena, group: &Group) -> Vec<NodeId> {
     let Some(&first) = group.members.first() else { return Vec::new() };
-    let want = (
-        arena.tag.get(first.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
-        class_bits(arena, first),
-    );
+    let want =
+        (arena.tag.get(first.idx()).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, first));
     if want.1 == 0 {
         return group.members.clone();
     }
@@ -352,10 +350,7 @@ pub fn members_by_identity(arena: &Arena, group: &Group) -> Vec<NodeId> {
             continue;
         }
         let node = NodeId(i as u32);
-        let got = (
-            arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN).0,
-            class_bits(arena, node),
-        );
+        let got = (arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, node));
         if got == want {
             out.push(node);
         }
@@ -378,10 +373,7 @@ pub fn merge_by_signature(arena: &Arena, groups: &[Group]) -> Vec<Group> {
     // same kind of thing, which is exactly the claim we want to trust here.
     let key = |g: &Group| {
         let m = g.members.first().copied().unwrap_or(NodeId(0));
-        (
-            arena.tag.get(m.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
-            class_bits(arena, m),
-        )
+        (arena.tag.get(m.idx()).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, m))
     };
     // Key every group once, then merge runs of equal keys after a sort. The obvious version --
     // scanning the accumulated output for a match per input group -- is O(groups^2) *and* recomputes
@@ -506,10 +498,8 @@ fn identity_group(arena: &Arena, parent: NodeId, kids: &[NodeId]) -> Option<Grou
     let mut ids: Vec<((u16, u64), u32)> = kids
         .iter()
         .filter_map(|&k| {
-            let id = (
-                arena.tag.get(k.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
-                class_bits(arena, k),
-            );
+            let id =
+                (arena.tag.get(k.idx()).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, k));
             (id.1 != 0).then_some((id, k.0))
         })
         .collect();
@@ -532,10 +522,7 @@ fn identity_group(arena: &Arena, parent: NodeId, kids: &[NodeId]) -> Option<Grou
         .max_by_key(|(_, m)| (m.len(), core::cmp::Reverse(m.first().map_or(u32::MAX, |n| n.0))))?;
     // Keyed by identity rather than by structure, which is what this group means. The value only
     // has to be stable and distinct, and `merge_by_signature` re-keys by identity anyway.
-    Some(Group {
-        by_identity: true,
-        ..describe(arena, parent, id.1 ^ u64::from(id.0), members)
-    })
+    Some(Group { by_identity: true, ..describe(arena, parent, id.1 ^ u64::from(id.0), members) })
 }
 
 fn element_children(arena: &Arena, p: usize) -> Vec<NodeId> {
@@ -612,10 +599,7 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
 fn has_paragraph(arena: &Arena, node: NodeId, end: usize) -> bool {
     (node.idx()..end.min(arena.len())).any(|i| {
         arena.kind.get(i).copied() == Some(NodeKind::Element)
-            && matches!(
-                arena.tag.get(i).copied(),
-                Some(TagId::P | TagId::BLOCKQUOTE)
-            )
+            && matches!(arena.tag.get(i).copied(), Some(TagId::P | TagId::BLOCKQUOTE))
             && arena.prose_len.get(i).copied().unwrap_or(0) > 0
     })
 }
@@ -669,10 +653,12 @@ fn coefficient_of_variation(v: &[u32]) -> f32 {
         return 0.0;
     }
     let var = guarded_div(
-        v.iter().map(|&x| {
-            let d = x as f32 - mean;
-            d * d
-        }).sum::<f32>(),
+        v.iter()
+            .map(|&x| {
+                let d = x as f32 - mean;
+                d * d
+            })
+            .sum::<f32>(),
         n,
     );
     guarded_div(sqrt_approx(var), mean)
@@ -717,10 +703,8 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
             continue;
         }
         if let Some(&m) = g.members.first() {
-            let id = (
-                arena.tag.get(m.idx()).copied().unwrap_or(TagId::UNKNOWN).0,
-                class_bits(arena, m),
-            );
+            let id =
+                (arena.tag.get(m.idx()).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, m));
             // A classless identity would match every bare <div> in the document.
             if id.1 != 0 && !identities.contains(&id) {
                 identities.push(id);
@@ -753,10 +737,7 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
             continue;
         }
         let node = NodeId(i as u32);
-        let id = (
-            arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN).0,
-            class_bits(arena, node),
-        );
+        let id = (arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, node));
         if !identities.contains(&id) {
             continue;
         }
@@ -800,7 +781,12 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::assertions_on_constants, clippy::float_cmp, clippy::indexing_slicing)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::assertions_on_constants,
+    clippy::float_cmp,
+    clippy::indexing_slicing
+)]
 mod tests {
     use super::*;
 
@@ -809,10 +795,7 @@ mod tests {
         for x in [0.0f32, 1.0, 2.0, 4.0, 9.0, 100.0, 1e6, 1e-6] {
             let a = sqrt_approx(x);
             let b = if x <= 0.0 { 0.0 } else { x.sqrt() };
-            assert!(
-                (a - b).abs() <= b * 1e-4 + 1e-6,
-                "sqrt_approx({x}) = {a}, expected ~{b}"
-            );
+            assert!((a - b).abs() <= b * 1e-4 + 1e-6, "sqrt_approx({x}) = {a}, expected ~{b}");
         }
         assert_eq!(sqrt_approx(-1.0), 0.0);
         assert_eq!(sqrt_approx(f32::NAN), 0.0);

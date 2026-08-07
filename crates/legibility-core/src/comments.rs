@@ -209,7 +209,10 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         let id = NodeId(i as u32);
         if author.is_none() && arena.tag.get(i).copied() == Some(TagId::A) {
             let is_author = arena.attr(id, AttrName::HREF).is_some_and(|h| {
-                h.contains("/u/") || h.contains("/user/") || h.contains("/@") || h.contains("/profile")
+                h.contains("/u/")
+                    || h.contains("/user/")
+                    || h.contains("/@")
+                    || h.contains("/profile")
             }) || arena
                 .attr(id, AttrName::CLASS)
                 .is_some_and(|c| c.contains("author") || c.contains("user"));
@@ -415,11 +418,7 @@ fn subtree_prose_excluding(arena: &Arena, node: NodeId, skip: &[Option<NodeId>])
     while i < end {
         // Jump the whole excluded subtree rather than filtering node by node, so nested markup
         // inside a byline (`<a><span>name</span></a>`) cannot leak a fragment through.
-        if let Some(s) = skip
-            .iter()
-            .flatten()
-            .find(|s| s.idx() == i)
-        {
+        if let Some(s) = skip.iter().flatten().find(|s| s.idx() == i) {
             i = arena.subtree_end.get(s.idx()).copied().unwrap_or(0) as usize;
             continue;
         }
@@ -492,10 +491,7 @@ fn resolve_depths(arena: &Arena, group: &Group, n: usize) -> (Vec<u16>, DepthSou
     let raw: Vec<u32> = members.iter().map(|&m| indent_px(arena, m)).collect();
     if raw.iter().any(|&v| v > 0) {
         let unit = smallest_positive_gap(&raw).max(1);
-        let depths = raw
-            .iter()
-            .map(|&v| u16::try_from(v / unit).unwrap_or(u16::MAX))
-            .collect();
+        let depths = raw.iter().map(|&v| u16::try_from(v / unit).unwrap_or(u16::MAX)).collect();
         return (depths, DepthSource::Indentation);
     }
 
@@ -533,11 +529,8 @@ fn read_depth_var(style: &str) -> Option<u16> {
     let after = lower.get(pos..)?;
     let colon = after.find(':')?;
     let val = after.get(colon + 1..)?;
-    let digits: String = val
-        .chars()
-        .skip_while(|c| c.is_whitespace())
-        .take_while(char::is_ascii_digit)
-        .collect();
+    let digits: String =
+        val.chars().skip_while(|c| c.is_whitespace()).take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
 }
 
@@ -550,12 +543,15 @@ fn indent_px(arena: &Arena, node: NodeId) -> u32 {
     for i in node.idx()..end {
         let id = NodeId(i as u32);
         // Hacker News encodes depth as `<td indent="N">`.
-        if let Some(n) = arena.attr(id, AttrName::INDENT).and_then(|v| v.trim().parse::<u32>().ok()) {
+        if let Some(n) = arena.attr(id, AttrName::INDENT).and_then(|v| v.trim().parse::<u32>().ok())
+        {
             return n;
         }
         // Old forums and archived HN use a spacer image whose width encodes depth.
         if arena.tag.get(i).copied() == Some(TagId::IMG) {
-            if let Some(w) = arena.attr(id, AttrName::WIDTH).and_then(|v| v.trim().parse::<u32>().ok()) {
+            if let Some(w) =
+                arena.attr(id, AttrName::WIDTH).and_then(|v| v.trim().parse::<u32>().ok())
+            {
                 if w > 0 {
                     return w;
                 }

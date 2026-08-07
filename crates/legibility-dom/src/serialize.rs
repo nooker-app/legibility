@@ -138,7 +138,9 @@ pub fn serialize_region_excluding<P: Profile>(
                 match kind {
                     NodeKind::Text => {
                         match role {
-                            TextRole::Prose => out.push_str(&escape_text(arena.own_text(NodeId(i as u32)))),
+                            TextRole::Prose => {
+                                out.push_str(&escape_text(arena.own_text(NodeId(i as u32))))
+                            }
                             TextRole::AltOnly if opts.include_sr_only => {
                                 out.push_str("<span data-lg-sr-only=\"\">");
                                 out.push_str(&escape_text(arena.own_text(NodeId(i as u32))));
@@ -266,9 +268,8 @@ pub fn serialize_region_excluding<P: Profile>(
 /// Table structure is exempt outright: an empty `<td>` is not noise, it is a column.
 fn collapse_empty_wrappers(out: &mut String, report: &mut SerializeReport) {
     /// Removing one of these would change a table's shape, not just its clutter.
-    const KEEP_EMPTY: [&str; 9] = [
-        "td", "th", "tr", "table", "thead", "tbody", "tfoot", "col", "colgroup",
-    ];
+    const KEEP_EMPTY: [&str; 9] =
+        ["td", "th", "tr", "table", "thead", "tbody", "tfoot", "col", "colgroup"];
 
     // Nested empties need more than one sweep: `<div><span></span></div>` only becomes an empty
     // `<div>` after the `<span>` goes. Bounded so a pathological input cannot spin here.
@@ -285,11 +286,8 @@ fn collapse_empty_wrappers(out: &mut String, report: &mut SerializeReport) {
                 break;
             };
             let open = &from_lt[..=gt];
-            let name: &str = open
-                .trim_start_matches('<')
-                .split([' ', '>', '/'])
-                .next()
-                .unwrap_or("");
+            let name: &str =
+                open.trim_start_matches('<').split([' ', '>', '/']).next().unwrap_or("");
             let after = &from_lt[gt + 1..];
             let close = format!("</{name}>");
             let empty = !name.is_empty()
@@ -486,10 +484,10 @@ mod tests {
 
     fn html_of<P: Profile>(src: &str) -> String {
         let (arena, _) = BuildArena::parse_to_arena(src, Limits::DEFAULT);
-        let body = (0..arena.len())
-            .find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY))
-            .unwrap();
-        let (h, _) = serialize_region::<P>(&arena, NodeId(body as u32), SerializeOptions::default());
+        let body =
+            (0..arena.len()).find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY)).unwrap();
+        let (h, _) =
+            serialize_region::<P>(&arena, NodeId(body as u32), SerializeOptions::default());
         h.into_inner()
     }
 
@@ -539,7 +537,8 @@ mod tests {
 
     #[test]
     fn unknown_elements_are_unwrapped_and_keep_their_text() {
-        let out = html_of::<Article>("<html><body><my-widget><p>inner</p></my-widget></body></html>");
+        let out =
+            html_of::<Article>("<html><body><my-widget><p>inner</p></my-widget></body></html>");
         assert!(out.contains("inner"), "custom element content lost: {out}");
         assert!(!out.contains("my-widget"), "unknown tag emitted: {out}");
     }
@@ -563,9 +562,8 @@ mod tests {
             &format!("<html><body>{deep}<p>x</p></body></html>"),
             Limits::DEFAULT,
         );
-        let body = (0..arena.len())
-            .find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY))
-            .unwrap();
+        let body =
+            (0..arena.len()).find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY)).unwrap();
         let (h, rep) = serialize_region::<Article>(
             &arena,
             NodeId(body as u32),
@@ -582,9 +580,8 @@ mod tests {
             &format!("<html><body><article>{long}</article></body></html>"),
             Limits::DEFAULT,
         );
-        let body = (0..arena.len())
-            .find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY))
-            .unwrap();
+        let body =
+            (0..arena.len()).find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY)).unwrap();
         let (h, rep) = serialize_region::<Article>(
             &arena,
             NodeId(body as u32),
@@ -604,11 +601,11 @@ mod tests {
     fn sr_only_is_omitted_by_default_and_recoverable_on_request() {
         let src = "<html><body><div><span class=sr-only>skip</span><p>real</p></div></body></html>";
         let (arena, _) = BuildArena::parse_to_arena(src, Limits::DEFAULT);
-        let body = (0..arena.len())
-            .find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY))
-            .unwrap();
+        let body =
+            (0..arena.len()).find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY)).unwrap();
 
-        let (off, _) = serialize_region::<Article>(&arena, NodeId(body as u32), SerializeOptions::default());
+        let (off, _) =
+            serialize_region::<Article>(&arena, NodeId(body as u32), SerializeOptions::default());
         assert!(!off.as_str().contains("skip"), "sr-only must be off by default");
 
         let (on, _) = serialize_region::<Article>(

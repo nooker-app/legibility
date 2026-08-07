@@ -39,9 +39,7 @@ struct NullSink {
 
 impl NullSink {
     fn new() -> Self {
-        Self {
-            names: RefCell::new(vec![QualName::new(None, ns!(), local_name!(""))]),
-        }
+        Self { names: RefCell::new(vec![QualName::new(None, ns!(), local_name!(""))]) }
     }
 }
 
@@ -100,7 +98,8 @@ fn corpus() -> Vec<(String, String)> {
         for p in names {
             let src = p.join("source.html");
             if let Ok(bytes) = std::fs::read(&src) {
-                let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let name =
+                    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                 out.push((name, String::from_utf8_lossy(&bytes).into_owned()));
             }
         }
@@ -127,9 +126,10 @@ fn main() {
         let t = Instant::now();
         let mut sink_nodes = 0usize;
         for (_, html) in &docs {
-            sink_nodes += html5ever::parse_document(NullSink::new(), html5ever::ParseOpts::default())
-                .from_utf8()
-                .one(html.as_bytes());
+            sink_nodes +=
+                html5ever::parse_document(NullSink::new(), html5ever::ParseOpts::default())
+                    .from_utf8()
+                    .one(html.as_bytes());
         }
         std::hint::black_box(sink_nodes);
         best_a = best_a.min(t.elapsed().as_secs_f64());
@@ -152,10 +152,27 @@ fn main() {
 
     let mib = total_bytes as f64 / (1024.0 * 1024.0);
     println!("PROBE-A  (best of {reps}, release)");
-    println!("  corpus              {} docs, {:.2} MiB, {} arena nodes", docs.len(), mib, nodes_total);
-    println!("  (a) null sink       {:>8.1} ms   {:>7.1} MiB/s   <- parser ceiling, not observable", best_a * 1e3, mib / best_a);
-    println!("  (b) full featurize  {:>8.1} ms   {:>7.1} MiB/s   <- BUDGET DERIVES FROM THIS", best_b * 1e3, mib / best_b);
-    println!("  our overhead        {:>8.1} ms   {:>7.1}x parse", (best_b - best_a) * 1e3, best_b / best_a);
+    println!(
+        "  corpus              {} docs, {:.2} MiB, {} arena nodes",
+        docs.len(),
+        mib,
+        nodes_total
+    );
+    println!(
+        "  (a) null sink       {:>8.1} ms   {:>7.1} MiB/s   <- parser ceiling, not observable",
+        best_a * 1e3,
+        mib / best_a
+    );
+    println!(
+        "  (b) full featurize  {:>8.1} ms   {:>7.1} MiB/s   <- BUDGET DERIVES FROM THIS",
+        best_b * 1e3,
+        mib / best_b
+    );
+    println!(
+        "  our overhead        {:>8.1} ms   {:>7.1}x parse",
+        (best_b - best_a) * 1e3,
+        best_b / best_a
+    );
     println!();
     println!("  Kill criterion (plan M0): if (b) is under ~40 MiB/s and profiling blames the");
     println!("  tokenizer state machine, the optimization ladder must be scheduled before M6.");

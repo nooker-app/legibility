@@ -48,11 +48,11 @@ pub mod shape;
 pub mod tag;
 
 pub use arena::{Arena, NodeId, NodeKind};
-pub use limits::{Limits, LimitsHit};
 pub use comments::{CommentItem, CommentSet, Completeness, DepthSource};
 pub use groups::{find_groups, Group};
-pub use pipeline::{run as extract_all, Outcome};
+pub use limits::{Limits, LimitsHit};
 pub use meta::{Candidate as MetaCandidate, Metadata, Source as MetaSource};
+pub use pipeline::{run as extract_all, Outcome};
 pub use score::{select_article, Candidate, PageStats, Selection};
 pub use shape::{DiscussionShape, Shape};
 pub use tag::TagId;

@@ -75,15 +75,8 @@ const PER_PAGE_TOLERANCE: f32 = 0.02;
 /// the marked body plus its adjacent dek — and until that exists this is a sentence lost against
 /// four sites' worth of credit bars and comment threads removed. Named rather than absorbed.
 #[allow(dead_code)]
-const KNOWN_REGRESSIONS: [&str; 7] = [
-    "bug-1255978",
-    "nytimes-3",
-    "ehow-1",
-    "hukumusume",
-    "quanta-1",
-    "simplyfound-1",
-    "wordpress",
-];
+const KNOWN_REGRESSIONS: [&str; 7] =
+    ["bug-1255978", "nytimes-3", "ehow-1", "hukumusume", "quanta-1", "simplyfound-1", "wordpress"];
 
 fn corpus() -> Vec<PathBuf> {
     let root =
@@ -144,8 +137,7 @@ fn f1(a: &str, b: &str) -> f32 {
         m
     };
     let (ca, cb) = (count(a), count(b));
-    let overlap: i32 =
-        ca.iter().map(|(k, &v)| v.min(cb.get(k).copied().unwrap_or(0))).sum();
+    let overlap: i32 = ca.iter().map(|(k, &v)| v.min(cb.get(k).copied().unwrap_or(0))).sum();
     if overlap == 0 {
         return 0.0;
     }

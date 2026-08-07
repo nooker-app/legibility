@@ -245,10 +245,8 @@ pub fn extract(arena: &Arena) -> Metadata {
                     r.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("canonical"))
                 }) {
                     if let Some((s, e)) = arena.attr_span(node, AttrName::HREF) {
-                        cands.push((
-                            "canonical_url",
-                            span_candidate(arena, s, e, Source::MetaName),
-                        ));
+                        cands
+                            .push(("canonical_url", span_candidate(arena, s, e, Source::MetaName)));
                     }
                 }
             }
@@ -295,11 +293,7 @@ pub fn extract(arena: &Arena) -> Metadata {
 
     // Authors are a list. Every author candidate is kept as its own entry rather than joined,
     // because joining then re-splitting is exactly how "Smith, John" becomes two people.
-    m.authors = cands
-        .iter()
-        .filter(|(f, _)| *f == "author")
-        .map(|(_, c)| c.clone())
-        .collect();
+    m.authors = cands.iter().filter(|(f, _)| *f == "author").map(|(_, c)| c.clone()).collect();
 
     if let (Some(title), Some(site)) = (m.title.as_ref(), m.site_name.as_ref()) {
         m.title_without_site_name = strip_site_suffix(arena, title, &site.value);
@@ -399,7 +393,9 @@ fn text_candidate(
         if arena.parent.get(i).copied() != Some(node) {
             continue;
         }
-        if require_prose && !arena.text_role.get(i).copied().is_some_and(crate::a11y::TextRole::is_prose) {
+        if require_prose
+            && !arena.text_role.get(i).copied().is_some_and(crate::a11y::TextRole::is_prose)
+        {
             continue;
         }
         let s = arena.text_start.get(i).copied().unwrap_or(0);
@@ -411,17 +407,13 @@ fn text_candidate(
 
     let first = *runs.first()?;
     let last = *runs.last()?;
-    let contiguous = runs
-        .windows(2)
-        .all(|w| matches!((w.first(), w.get(1)), (Some(a), Some(b)) if b.0 == a.1));
+    let contiguous =
+        runs.windows(2).all(|w| matches!((w.first(), w.get(1)), (Some(a), Some(b)) if b.0 == a.1));
 
     let (span_start, span_end) = if contiguous {
         (first.0, last.1)
     } else {
-        runs.iter()
-            .max_by_key(|(s, e)| e.saturating_sub(*s))
-            .copied()
-            .unwrap_or(first)
+        runs.iter().max_by_key(|(s, e)| e.saturating_sub(*s)).copied().unwrap_or(first)
     };
 
     let c = span_candidate(arena, span_start, span_end, source);
@@ -511,9 +503,7 @@ fn fold_eq(a: &str, b: &str) -> bool {
 #[must_use]
 pub fn parse_date(raw: &str) -> DateValue {
     let t = raw.trim();
-    let tz_known = t.ends_with('Z')
-        || t.ends_with('z')
-        || has_numeric_offset(t);
+    let tz_known = t.ends_with('Z') || t.ends_with('z') || has_numeric_offset(t);
 
     // Accept only ISO-8601-shaped input: YYYY-MM-DD optionally followed by a time.
     let iso = if is_iso_shaped(t) { Some(t.to_string()) } else { None };
@@ -538,11 +528,15 @@ fn is_iso_shaped(t: &str) -> bool {
         return false;
     }
     let d = |i: usize| b.get(i).is_some_and(u8::is_ascii_digit);
-    d(0) && d(1) && d(2) && d(3)
+    d(0) && d(1)
+        && d(2)
+        && d(3)
         && b.get(4) == Some(&b'-')
-        && d(5) && d(6)
+        && d(5)
+        && d(6)
         && b.get(7) == Some(&b'-')
-        && d(8) && d(9)
+        && d(8)
+        && d(9)
 }
 
 #[cfg(test)]

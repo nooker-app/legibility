@@ -1,0 +1,95 @@
+# The checks that decide whether a change is allowed to land.
+#
+# Everything here ran only on one laptop until now, and this session is the argument for the
+# workflow: guarantee S3 — byte-identical output across targets — was broken on **123 of the 130
+# corpus pages** for an unknown length of time, and the local gate could not see it because it
+# compared a single hand-written fixture. Checks that live on a developer's machine are checks that
+# run when someone remembers.
+#
+# Two jobs rather than one. `gate` is the whole M0 exit gate and is the thing that must be green;
+# `macos` exists only for the two legs that need Apple's linker, and is allowed to be slower.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only. Nothing here publishes, and the pages workflow is where write access lives.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # A failed build should say so quickly rather than after a full backtrace-less mystery.
+  RUST_BACKTRACE: 1
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      # `submodules: recursive` is load-bearing: the corpus is a submodule, and without it the
+      # ratchet silently measures zero pages and the S3 leg compares one fixture. Both would pass.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
+          rustup component add clippy rustfmt
+          rustup target add wasm32-unknown-unknown wasm32-wasip1
+
+      # Everything cargo builds, keyed on the lockfile. The corpus is a pinned submodule so it needs
+      # no cache of its own.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasmtime
+        run: |
+          curl -sSf https://wasmtime.dev/install.sh | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked || cargo install cargo-deny
+
+      # The gate runs `cargo test`, clippy, `cargo deny`, the no-recursion and FFI audits, the D9
+      # third-party-HTML check, the CNAME guard, and the cross-target S3 comparison over every
+      # corpus page. It skips the two iOS legs on Linux and says so.
+      - name: M0 exit gate
+        run: scripts/m0-gate.sh
+
+      # Separately from the gate, because `chk` swallows output and a ratchet failure has to name
+      # the pages that fell. Release, because the corpus run is otherwise slow enough to matter.
+      - name: Corpus ratchet
+        run: cargo test -p legibility-cli --release --test anchor_band
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+  # The two checks that cannot run on Linux. Kept in their own job so a Linux-only failure is never
+  # reported as an iOS problem, and so the expensive runner is not in the critical path.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Toolchain
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Plan §1.11.5: the point is to learn *now* that a dependency does not build for iOS, rather
+      # than in v2 when it is expensive to undo. Building is the whole check; running is v2.
+      - name: iOS reachability
+        run: |
+          cargo build --release -p legibility-core --target aarch64-apple-ios
+          cargo build --release -p legibility-core --target aarch64-apple-ios-sim
+
+      - name: FFI audit
+        run: python3 scripts/ffi-audit.py

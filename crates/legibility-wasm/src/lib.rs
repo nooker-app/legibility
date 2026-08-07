@@ -180,8 +180,7 @@ mod tests {
         // to one serializer and not the other -- which would break the cross-target determinism
         // gate in a way that is tedious to diagnose from a hash mismatch.
         let html = "<html><body><article><p>alpha beta gamma</p></article></body></html>";
-        let (arena, hit) =
-            legibility_dom::BuildArena::parse_to_arena(html, Limits::BROWSER);
+        let (arena, hit) = legibility_dom::BuildArena::parse_to_arena(html, Limits::BROWSER);
         let out = legibility_core::extract_all(&arena, Limits::BROWSER);
         let direct =
             legibility_dom::json::extraction_json_limited(&arena, &out, hit, None, Limits::BROWSER);

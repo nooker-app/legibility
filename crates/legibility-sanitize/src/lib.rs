@@ -106,17 +106,72 @@ impl<P: Profile> SanitizedHtml<P> {
 
 /// Elements permitted in output. Everything not listed is unwrapped (children kept) or dropped.
 const ALLOWED: &[&str] = &[
-    "a", "abbr", "article", "aside", "b", "blockquote", "br", "caption", "cite", "code", "col",
-    "colgroup", "dd", "del", "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
+    "a",
+    "abbr",
+    "article",
+    "aside",
+    "b",
+    "blockquote",
+    "br",
+    "caption",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "figcaption",
+    "figure",
     // `img` was missing here until a test asked whether an image-only `<figure>` survived
     // serialization. It did not -- and no article had ever carried an image -- while
     // `element_attrs("img")` and the `P::IMAGES` gate below sat as unreachable code stating the
     // opposite intent. Absence is invisible in a text-token F1 score, which is why the corpus
     // ratchet never noticed.
-    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "kbd", "li", "main", "mark", "ol",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "i",
+    "img",
+    "ins",
+    "kbd",
+    "li",
+    "main",
+    "mark",
+    "ol",
     "p",
-    "pre", "q", "s", "samp", "section", "small", "span", "strong", "sub", "summary", "sup",
-    "table", "tbody", "td", "tfoot", "th", "thead", "time", "tr", "u", "ul", "var", "wbr",
+    "pre",
+    "q",
+    "s",
+    "samp",
+    "section",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "summary",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "tr",
+    "u",
+    "ul",
+    "var",
+    "wbr",
 ];
 
 /// Elements whose entire subtree is discarded, text included.
@@ -141,10 +196,10 @@ const ALLOWED: &[&str] = &[
 /// and the controls inside it are still dropped individually by the entries below. Nothing is gained
 /// by taking the prose with them.
 const DROP_SUBTREE: &[&str] = &[
-    "script", "style", "noscript", "template", "iframe", "embed", "object", "applet",
-    "input", "button", "select", "textarea", "option", "optgroup", "label", "fieldset", "legend",
-    "svg", "math", "canvas", "map", "area", "audio", "video", "source", "track", "dialog",
-    "meta", "link", "base", "title", "head",
+    "script", "style", "noscript", "template", "iframe", "embed", "object", "applet", "input",
+    "button", "select", "textarea", "option", "optgroup", "label", "fieldset", "legend", "svg",
+    "math", "canvas", "map", "area", "audio", "video", "source", "track", "dialog", "meta", "link",
+    "base", "title", "head",
 ];
 
 /// Attributes allowed on any element.
@@ -201,22 +256,26 @@ pub fn check_url(raw: &str) -> UrlField {
     // Relative and fragment URLs carry no scheme and are safe by construction.
     let scheme_end = trimmed.find(':');
     let Some(idx) = scheme_end else {
-        return UrlField { url: Some(trimmed.to_string()), raw: raw.to_string(), reject_reason: None };
+        return UrlField {
+            url: Some(trimmed.to_string()),
+            raw: raw.to_string(),
+            reject_reason: None,
+        };
     };
     // A ':' after a '/' or '?' is part of a path or query, not a scheme.
     let before = trimmed.get(..idx).unwrap_or("");
     if before.contains('/') || before.contains('?') || before.contains('#') {
-        return UrlField { url: Some(trimmed.to_string()), raw: raw.to_string(), reject_reason: None };
+        return UrlField {
+            url: Some(trimmed.to_string()),
+            raw: raw.to_string(),
+            reject_reason: None,
+        };
     }
     let scheme = before.to_ascii_lowercase();
     if ALLOWED_SCHEMES.contains(&scheme.as_str()) {
         UrlField { url: Some(trimmed.to_string()), raw: raw.to_string(), reject_reason: None }
     } else {
-        UrlField {
-            url: None,
-            raw: raw.to_string(),
-            reject_reason: Some("scheme not in allowlist"),
-        }
+        UrlField { url: None, raw: raw.to_string(), reject_reason: Some("scheme not in allowlist") }
     }
 }
 
@@ -277,9 +336,9 @@ pub fn filter_code_class(value: &str) -> Option<String> {
                 && t.starts_with("language-")
                 && t.get(9..).is_some_and(|rest| {
                     !rest.is_empty()
-                        && rest
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '.' | '-'))
+                        && rest.chars().all(|c| {
+                            c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '.' | '-')
+                        })
                 })
         })
         .collect();
@@ -298,10 +357,8 @@ pub fn filter_code_class(value: &str) -> Option<String> {
 /// collision.
 #[must_use]
 pub fn namespace_id<P: Profile>(id: &str) -> String {
-    let safe: String = id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-        .collect();
+    let safe: String =
+        id.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')).collect();
     format!("{}{safe}", P::ID_PREFIX)
 }
 

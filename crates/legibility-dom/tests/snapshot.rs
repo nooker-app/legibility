@@ -189,8 +189,10 @@ fn beebs_thread(n: usize) -> String {
             h = i % 9,
         ));
     }
-    s.push_str("</ol><form class=\"comment-form\"><button type=\"button\">댓글을 남겨보세요.</button>\
-                </form></section></main></body></html>");
+    s.push_str(
+        "</ol><form class=\"comment-form\"><button type=\"button\">댓글을 남겨보세요.</button>\
+                </form></section></main></body></html>",
+    );
     s
 }
 
@@ -243,9 +245,7 @@ fn cards_are_not_a_listing() -> String {
         ));
     }
     for i in 0..2 {
-        s.push_str(&format!(
-            "<div class=\"tag-pill\"><a href=\"/t/{i}\">topic {i}</a></div>"
-        ));
+        s.push_str(&format!("<div class=\"tag-pill\"><a href=\"/t/{i}\">topic {i}</a></div>"));
     }
     s.push_str("</aside></main></body></html>");
     s
@@ -377,9 +377,8 @@ fn timeline_events() -> String {
            borrower returns it.</p></div>\
          <div id=\"timeline\">",
     );
-    for (i, (verb, hash)) in [("added 3 commits", "8918818"), ("added 2 commits", "8b85ec7")]
-        .iter()
-        .enumerate()
+    for (i, (verb, hash)) in
+        [("added 3 commits", "8918818"), ("added 2 commits", "8b85ec7")].iter().enumerate()
     {
         s.push_str(&format!(
             "<div class=\"TimelineItem\" id=\"event-{i}\">\
@@ -577,9 +576,7 @@ fn every_shape_produces_the_output_it_was_committed_with() {
 /// test output; `git diff` after blessing is where the whole picture is.
 fn first_difference(want: &str, got: &str) -> String {
     let (w, g): (Vec<&str>, Vec<&str>) = (want.lines().collect(), got.lines().collect());
-    let at = (0..w.len().max(g.len()))
-        .find(|&i| w.get(i) != g.get(i))
-        .unwrap_or(0);
+    let at = (0..w.len().max(g.len())).find(|&i| w.get(i) != g.get(i)).unwrap_or(0);
     let from = at.saturating_sub(2);
     let mut s = String::new();
     for i in from..at {

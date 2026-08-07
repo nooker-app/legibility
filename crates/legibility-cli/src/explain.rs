@@ -23,10 +23,7 @@ pub fn explain(arena: &Arena, limits: Limits, top: usize) -> String {
     // conclusions, not intermediates -- see the note at the end of this function.
     let found = groups::merge_by_signature(arena, &groups::find_groups(arena));
     let stated = legibility_core::comments::claimed_total(arena);
-    let thread = found
-        .iter()
-        .filter(|g| g.is_comment_thread(stated))
-        .max_by_key(|g| g.prose_len);
+    let thread = found.iter().filter(|g| g.is_comment_thread(stated)).max_by_key(|g| g.prose_len);
     let masked = if thread.is_some() {
         groups::mask_comment_prose(arena, &found, stated)
     } else {
@@ -200,9 +197,8 @@ pub fn region_map(arena: &Arena, limits: Limits, min_prose: u32) -> String {
     };
     let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
     let title = out.shape.as_ref().map(|sh| sh.title);
-    let title_end = title
-        .and_then(|t| arena.subtree_end.get(t.idx()).copied())
-        .unwrap_or(0) as usize;
+    let title_end =
+        title.and_then(|t| arena.subtree_end.get(t.idx()).copied()).unwrap_or(0) as usize;
 
     s.push_str(&format!(
         "region {} <{}>  prose {}B  ·  shape {}  ·  title {}\n",
@@ -227,16 +223,8 @@ pub fn region_map(arena: &Arena, limits: Limits, min_prose: u32) -> String {
         let hidden = arena.hidden_len.get(i).copied().unwrap_or(0);
         let alt = arena.alt_len.get(i).copied().unwrap_or(0);
         let denom = f64::from(prose + control + hidden + alt);
-        let purity = if denom == 0.0 {
-            0.0
-        } else {
-            f64::from(prose) / denom
-        };
-        let link_d = if prose == 0 {
-            0.0
-        } else {
-            f64::from(link) / f64::from(prose)
-        };
+        let purity = if denom == 0.0 { 0.0 } else { f64::from(prose) / denom };
+        let link_d = if prose == 0 { 0.0 } else { f64::from(link) / f64::from(prose) };
         let where_ = match title {
             Some(t) if i >= t.idx() && i < title_end => "in-title",
             Some(t)

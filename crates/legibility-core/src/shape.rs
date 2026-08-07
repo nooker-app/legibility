@@ -225,21 +225,9 @@ pub fn decide(
     // serializer's answer to a pointer is an empty body -- so a misjudgement here does not
     // degrade the article, it deletes it. A pointer that points nowhere is not a pointer.
     if qualified.is_some() || link.is_none() {
-        Some(Shape {
-            kind: DiscussionShape::WithBody,
-            title,
-            body: qualified,
-            link,
-            byline,
-        })
+        Some(Shape { kind: DiscussionShape::WithBody, title, body: qualified, link, byline })
     } else {
-        Some(Shape {
-            kind: DiscussionShape::LinkOnly,
-            title,
-            body: None,
-            link,
-            byline,
-        })
+        Some(Shape { kind: DiscussionShape::LinkOnly, title, body: None, link, byline })
     }
 }
 
@@ -351,10 +339,7 @@ fn is_prose_block(arena: &Arena, node: NodeId) -> bool {
     let control = arena.control_len.get(i).copied().unwrap_or(0);
     let hidden = arena.hidden_len.get(i).copied().unwrap_or(0);
     let alt = arena.alt_len.get(i).copied().unwrap_or(0);
-    let all = prose
-        .saturating_add(control)
-        .saturating_add(hidden)
-        .saturating_add(alt);
+    let all = prose.saturating_add(control).saturating_add(hidden).saturating_add(alt);
     let purity = guarded_div(prose as f32, all as f32);
     let link_density = arena.link_density(node).clamp(0.0, 1.0);
     purity >= Candidate::MIN_PURITY && link_density <= Candidate::MAX_LINK_DENSITY

@@ -21,7 +21,8 @@ fn assert_verbatim(arena: &legibility_core::Arena, m: &legibility_core::Metadata
         if c.is_ws_only() {
             let re = ws_normalize(arena.span_text(c.span_start, c.span_end));
             assert_eq!(
-                re, c.value,
+                re,
+                c.value,
                 "VERBATIM INVARIANT violated for field `{field}` from {}: \
                  span re-derives to {re:?} but value is {:?}",
                 c.source.as_str(),
@@ -229,10 +230,7 @@ fn hostile_and_malformed_documents_do_not_break_the_invariant() {
         // Not every fixture yields a candidate, so this checks the invariant directly rather
         // than through the helper's "at least one" assertion.
         for (field, c) in &m.alternatives {
-            assert!(
-                c.verify_verbatim(&arena),
-                "invariant broken for `{field}` on {html:?}"
-            );
+            assert!(c.verify_verbatim(&arena), "invariant broken for `{field}` on {html:?}");
         }
     }
 }

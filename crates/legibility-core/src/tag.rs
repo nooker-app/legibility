@@ -122,7 +122,10 @@ impl TagId {
     /// Elements that never render text into the document.
     #[must_use]
     pub const fn is_non_rendered(self) -> bool {
-        matches!(self, TagId::SCRIPT | TagId::STYLE | TagId::NOSCRIPT | TagId::TEMPLATE | TagId::HEAD)
+        matches!(
+            self,
+            TagId::SCRIPT | TagId::STYLE | TagId::NOSCRIPT | TagId::TEMPLATE | TagId::HEAD
+        )
     }
 
     /// Elements that are positive semantic anchors for the article region.
@@ -173,8 +176,16 @@ mod tests {
     #[test]
     fn landmark_classes_are_disjoint() {
         let all = [
-            TagId::A, TagId::ARTICLE, TagId::MAIN, TagId::NAV, TagId::HEADER,
-            TagId::FOOTER, TagId::ASIDE, TagId::FORM, TagId::DIV, TagId::P,
+            TagId::A,
+            TagId::ARTICLE,
+            TagId::MAIN,
+            TagId::NAV,
+            TagId::HEADER,
+            TagId::FOOTER,
+            TagId::ASIDE,
+            TagId::FORM,
+            TagId::DIV,
+            TagId::P,
         ];
         for t in all {
             assert!(

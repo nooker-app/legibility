@@ -1,0 +1,9 @@
+# Formatting is tool-decided (there is a `cargo fmt --check` in CI), and this file exists so the
+# tool decides the way the code was already written rather than reflowing 1200 lines of it.
+#
+# `Max` is the only non-default setting that matters here: the default heuristics break a short
+# `if … { … } else { … }` inside a call across five lines once it passes 50 characters, and this
+# codebase uses those inline constantly in `format!` arguments and match arms. With `Max` they stay
+# on one line whenever the line fits, which is what a human was already doing by hand.
+use_small_heuristics = "Max"
+max_width = 100

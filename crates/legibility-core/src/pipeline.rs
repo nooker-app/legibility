@@ -72,15 +72,9 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     // would hand back a different thread for two groups of equal prose. Reversing the first member's
     // index inside the key makes the whole key a total order, so the choice cannot depend on
     // iteration order or on which of two equal groups was seen last.
-    let thread = groups
-        .iter()
-        .filter(|g| g.is_comment_thread(stated_total))
-        .max_by_key(|g| {
-            (
-                g.prose_len,
-                core::cmp::Reverse(g.members.first().map_or(u32::MAX, |m| m.0)),
-            )
-        });
+    let thread = groups.iter().filter(|g| g.is_comment_thread(stated_total)).max_by_key(|g| {
+        (g.prose_len, core::cmp::Reverse(g.members.first().map_or(u32::MAX, |m| m.0)))
+    });
 
     let masked = if thread.is_some() {
         groups::mask_comment_prose(arena, &groups, stated_total)
@@ -103,10 +97,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     let comments = match thread {
         Some(g) if !reverted => {
             // Extract by identity so a lone reply, which cannot form a group, is still a comment.
-            let expanded = Group {
-                members: groups::members_by_identity(arena, g),
-                ..g.clone()
-            };
+            let expanded = Group { members: groups::members_by_identity(arena, g), ..g.clone() };
             let mut set = comments::extract(arena, &expanded, limits.max_comment_items);
             fill_completeness(arena, &mut set, stated_total);
             set
@@ -129,11 +120,8 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     // mistaken for one.
     let listing = dominant_listing(&groups, page_prose, stated_total);
     if listing && comments.is_empty() {
-        selection = Selection {
-            article: None,
-            no_article: Some(NoArticle::IndexPage),
-            ..selection
-        };
+        selection =
+            Selection { article: None, no_article: Some(NoArticle::IndexPage), ..selection };
     }
 
     let mut sections: Vec<crate::NodeId> = Vec::new();
@@ -275,10 +263,8 @@ pub fn comment_section_nodes(
         }
     }
 
-    let removed: u32 = found
-        .iter()
-        .map(|n| arena.prose_len.get(n.idx()).copied().unwrap_or(0))
-        .sum();
+    let removed: u32 =
+        found.iter().map(|n| arena.prose_len.get(n.idx()).copied().unwrap_or(0)).sum();
     if removed >= region_prose {
         return Vec::new();
     }
@@ -308,15 +294,26 @@ fn named_furniture(arena: &Arena, node: crate::NodeId) -> bool {
     /// Whole `-`/`_`-separated tokens only: `header` must not match `headline`, and `ad` must never
     /// be a substring test at all.
     const TOKENS: [&str; 14] = [
-        "header", "footer", "nav", "navigation", "menu", "sidebar", "banner", "breadcrumb",
-        "breadcrumbs", "toolbar", "pagination", "pager", "social", "share",
+        "header",
+        "footer",
+        "nav",
+        "navigation",
+        "menu",
+        "sidebar",
+        "banner",
+        "breadcrumb",
+        "breadcrumbs",
+        "toolbar",
+        "pagination",
+        "pager",
+        "social",
+        "share",
     ];
     let named = [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
         .into_iter()
         .filter_map(|a| arena.attr(node, a))
         .any(|v| {
-            v.split([' ', '-', '_'])
-                .any(|t| TOKENS.iter().any(|k| t.eq_ignore_ascii_case(k)))
+            v.split([' ', '-', '_']).any(|t| TOKENS.iter().any(|k| t.eq_ignore_ascii_case(k)))
         });
     if !named {
         return false;
@@ -551,12 +548,7 @@ fn subtree_text_lower(arena: &Arena, node: crate::NodeId) -> alloc::string::Stri
 fn declared_title(m: &Metadata) -> Option<&str> {
     core::iter::once(m.title.as_ref())
         .flatten()
-        .chain(
-            m.alternatives
-                .iter()
-                .filter(|(field, _)| *field == "title")
-                .map(|(_, c)| c),
-        )
+        .chain(m.alternatives.iter().filter(|(field, _)| *field == "title").map(|(_, c)| c))
         .filter(|c| c.source != meta::Source::H1)
         .max_by_key(|c| c.confidence)
         .map(|c| c.value.as_str())
@@ -600,10 +592,7 @@ fn duplicate_heading(arena: &Arena, region: crate::NodeId, title: &str) -> Optio
         if arena.kind.get(i).copied() != Some(crate::NodeKind::Element) {
             continue;
         }
-        if !matches!(
-            arena.tag.get(i).copied(),
-            Some(crate::TagId::H1 | crate::TagId::H2)
-        ) {
+        if !matches!(arena.tag.get(i).copied(), Some(crate::TagId::H1 | crate::TagId::H2)) {
             continue;
         }
         if arena.prose_len.get(i).copied().unwrap_or(0) == 0 {
@@ -803,7 +792,10 @@ mod tests {
             by_identity: false,
         };
         assert!(small.is_listing());
-        assert!(!dominant_listing(core::slice::from_ref(&small), 10_000, None), "5% of the page is not dominant");
+        assert!(
+            !dominant_listing(core::slice::from_ref(&small), 10_000, None),
+            "5% of the page is not dominant"
+        );
 
         let big = Group { prose_len: 9_000, ..small };
         assert!(dominant_listing(&[big], 10_000, None), "90% of the page is a listing");
