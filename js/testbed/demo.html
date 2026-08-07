@@ -274,7 +274,25 @@ function render(d) {
   $("json").textContent = JSON.stringify(d, null, 2);
 
   const a = d.article;
-  if (a) {
+  // A wall that got through the fetch check, or one pasted in from a saved file. Said here rather
+  // than only in the fetch path because the input may not have come from the fetch path at all —
+  // saving a blocked page to disk and dropping it in produces exactly the same 200-with-an-
+  // interstitial, and the extraction is then correct about a page nobody wanted.
+  //
+  // Requires the article to be *short* as well as matching. An article about bot walls quotes these
+  // phrases and runs to thousands of characters; an interstitial is a sentence and a button.
+  const wall = a && (a.text || "").length < BLOCKED_TEXT_MAX ? blockedBy(a.text || "") : null;
+  if (wall) {
+    $("article").innerHTML =
+      `<p class="err"><strong>This is ${esc(wall)}, not the page.</strong> The site served a block ` +
+      `page instead of the article — it refuses requests that do not come from a browser it ` +
+      `recognises, and no proxy can get past that.</p>` +
+      `<p class="note">Open the page in your browser, save it (⌘S), and drop the file in. That ` +
+      `path involves nobody and the site sees an ordinary visit.</p>` +
+      `<p class="note">Extracted from the block page, for reference:</p>` +
+      `<blockquote>${esc(a.text || "")}</blockquote>`;
+    $("ameta").textContent = `${wall} — not the article`;
+  } else if (a) {
     if (a.kind === "discussion-root") {
       // A link submission has no body, so an empty panel here is the correct answer — but it
       // reads as a failure. Render what the page actually is: a headline pointing somewhere.
@@ -457,7 +475,10 @@ async function fetchWithoutHelper(url) {
   // for any host that sends `Access-Control-Allow-Origin` — raw file hosts, many APIs, some blogs.
   try {
     const res = await fetch(url, { redirect: "follow" });
-    if (res.ok) return await res.text();
+    if (res.ok) {
+      const body = await res.text();
+      if (!blockedBy(body)) return body;
+    }
   } catch (_) {
     // A CORS rejection is deliberately indistinguishable from a network error here. Either way the
     // next step is the same.
@@ -473,7 +494,15 @@ async function fetchWithoutHelper(url) {
     try {
       const res = await fetch(proxy + joinTarget(proxy, url));
       const body = await res.text();
-      if (res.ok && body.trim()) return body;
+      if (res.ok && body.trim()) {
+        // A wall answers 200 with an interstitial. Treat it as this route failing rather than as
+        // the page, and try the next proxy — they come from different networks, so one may not be
+        // blocked even when another is.
+        const wall = blockedBy(body);
+        if (!wall) return body;
+        failures.push(`${host(proxy)}: served ${wall}, not the page`);
+        continue;
+      }
       failures.push(`${host(proxy)}: HTTP ${res.status}`);
     } catch (e) {
       failures.push(`${host(proxy)}: ${e.message || e}`);
@@ -490,6 +519,43 @@ async function fetchWithoutHelper(url) {
         `outright while serving browsers normally, and no proxy can get past that.`
       : "That site does not allow other pages to read it (CORS), and no proxy is set.")
   );
+}
+
+// Interstitials that a bot wall serves with HTTP 200 in place of the page.
+//
+// This matters because the failure is otherwise indistinguishable from ours. Reddit answers a proxy
+// with 190 KB carrying no `<title>` and one sentence — "You've been blocked by network security" —
+// and the demo dutifully extracted that sentence as the article. It reads as the parser having
+// mangled the page, and the actual cause, that the site refuses data-centre traffic, is nowhere on
+// screen.
+//
+// Phrases rather than status codes, because the status is 200. Each is distinctive enough that a
+// page merely *about* bot walls would have to quote one verbatim, and the second check below
+// requires the extracted article to be short as well, which such an article would not be.
+// Longest an extracted article may be and still be judged an interstitial rather than prose about
+// one. A wall is a sentence and a button; a real article that quotes one is not.
+const BLOCKED_TEXT_MAX = 1200;
+
+const BLOCK_MARKERS = [
+  ["Reddit's bot wall", "you've been blocked by network security"],
+  ["Cloudflare", "attention required! | cloudflare"],
+  ["Cloudflare", "checking your browser before accessing"],
+  ["Cloudflare", "enable javascript and cookies to continue"],
+  ["a CAPTCHA", "please verify you are a human"],
+  ["a CAPTCHA", "verify you are human by completing"],
+  ["Google's rate limiter", "unusual traffic from your computer network"],
+  ["PerimeterX", "access to this page has been denied"],
+  ["DataDome", "captcha-delivery.com"],
+  ["Imperva", "request unsuccessful. incapsula incident"],
+];
+
+// Which wall a page belongs to, or null. `hint` narrows the haystack for the post-extraction check.
+function blockedBy(text) {
+  const hay = text.toLowerCase();
+  for (const [name, marker] of BLOCK_MARKERS) {
+    if (hay.includes(marker)) return name;
+  }
+  return null;
 }
 
 // The two shapes a CORS proxy comes in. `…/raw?url=` takes the target as a query parameter and
