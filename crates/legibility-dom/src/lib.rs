@@ -123,6 +123,11 @@ struct Build {
     /// Dynamically interned names for custom/unknown elements.
     dynamic_tags: Vec<String>,
     errors: usize,
+    /// First build index past [`Limits::max_nodes`]; nothing from here on is recorded.
+    ///
+    /// `None` until the cap is reached. See [`Build::new_node`] for why the cap cannot be enforced
+    /// at allocation time.
+    overflow_sink: Option<u32>,
 }
 
 /// Phase-1 arena and html5ever sink.
@@ -148,6 +153,7 @@ impl BuildArena {
                 limits_hit: LimitsHit::default(),
                 dynamic_tags: Vec::new(),
                 errors: 0,
+                overflow_sink: None,
             }),
             limits,
         }
@@ -209,6 +215,11 @@ impl BuildArena {
             Exit(u32),
         }
 
+        // Everything at or past this build index was allocated after `max_nodes` was reached, and is
+        // not recorded — the documented degradation for that limit. Enforced here rather than at
+        // allocation because html5ever needs unique handles to keep its own stack coherent.
+        let cut = build.overflow_sink.unwrap_or(u32::MAX);
+
         let mut stack: Vec<Step> = vec![Step::Enter(0, TextRole::Prose)];
         // Maps build index -> emitted arena index, needed to patch subtree_end on exit.
         let mut emitted: Vec<u32> = vec![NONE; build.nodes.len()];
@@ -226,6 +237,9 @@ impl BuildArena {
                     parent_stack.pop();
                 }
                 Step::Enter(bi, inherited) => {
+                    if bi >= cut {
+                        continue;
+                    }
                     let Some(node) = build.nodes.get(bi as usize) else { continue };
 
                     let role = TextRole::inherit(inherited, node.own_role);
@@ -293,15 +307,32 @@ impl Build {
     }
 
     fn push_text(&mut self, s: &str, limits: &Limits) -> (u32, u32) {
+        // Text is bounded by `max_input_bytes`, not by `max_attr_bytes`. The two used to share this
+        // function *and* its cap, so any text node over 64 KiB was silently cut and the loss was
+        // reported as `attr_bytes` -- a long article with one big paragraph lost its ending and said
+        // it had hit an attribute limit. `doc_buf` cannot exceed the document anyway, so this is a
+        // ceiling rather than a policy.
+        self.push_capped(s, limits.max_input_bytes as usize, false)
+    }
+
+    /// Copy an attribute value, capped at [`Limits::max_attr_bytes`].
+    fn push_attr_value(&mut self, s: &str, limits: &Limits) -> (u32, u32) {
+        self.push_capped(s, limits.max_attr_bytes as usize, true)
+    }
+
+    fn push_capped(&mut self, s: &str, room: usize, is_attr: bool) -> (u32, u32) {
         let start = self.doc_buf.len() as u32;
-        let room = limits.max_attr_bytes as usize;
         if s.len() > room {
             let mut end = room;
             while end > 0 && !s.is_char_boundary(end) {
                 end -= 1;
             }
             self.doc_buf.push_str(s.get(..end).unwrap_or(""));
-            self.limits_hit.attr_bytes = true;
+            if is_attr {
+                self.limits_hit.attr_bytes = true;
+            } else {
+                self.limits_hit.input_bytes = true;
+            }
         } else {
             self.doc_buf.push_str(s);
         }
@@ -318,7 +349,7 @@ impl Build {
         let mut n = 0u16;
         for a in attrs {
             let name = legibility_core::arena::AttrName::from_name(a.name.local.as_ref());
-            let (vs, ve) = self.push_text(a.value.as_ref(), limits);
+            let (vs, ve) = self.push_attr_value(a.value.as_ref(), limits);
             self.attrs.push(legibility_core::arena::Attr {
                 name,
                 value_start: vs,
@@ -488,13 +519,30 @@ impl Build {
         }
     }
 
+    /// Allocate a node, marking where [`Limits::max_nodes`] was crossed.
+    ///
+    /// # Why the cap cannot be applied here
+    ///
+    /// It used to return handle `0` — the *document* — as a sink for everything past the cap, on the
+    /// reasoning that "every later operation on it is structurally harmless". It is not. The tree
+    /// builder puts whatever `create_element` returns on its open-elements stack, compares handles
+    /// for identity, and pops them; handing back one shared handle made two different elements
+    /// indistinguishable, the stack unbalanced, and html5ever panicked with `no current element`.
+    /// Inside a dependency, so `#![forbid(unsafe_code)]` and every discipline in this crate were
+    /// irrelevant. **Any document past the cap crashed the library** — exactly what S1 and S2 exist
+    /// to rule out — and no test covered the path. Returning a single *element* instead was tried
+    /// next and panicked identically, because the problem is aliasing rather than kind.
+    ///
+    /// A `TreeSink` has no way to say "stop". So the cap moves to where we do have a choice:
+    /// allocation continues with unique handles, and [`BuildArena::flatten`] refuses to record
+    /// anything at or past `overflow_sink`. That is the degradation the documentation already
+    /// promised — "the remainder of the document is not parsed" — delivered one phase later, and the
+    /// build arena is still bounded, because a node cannot exist without input bytes to spell it and
+    /// `max_input_bytes` bounds those.
     fn new_node(&mut self, kind: NodeKind, name: QualName, limits: &Limits) -> u32 {
-        if self.nodes.len() as u32 >= limits.max_nodes {
+        if self.nodes.len() as u32 >= limits.max_nodes && self.overflow_sink.is_none() {
             self.limits_hit.nodes = true;
-            // Reuse the document node as a sink handle. Every later operation on it is
-            // structurally harmless, and the handle stays valid — which is the property
-            // html5ever depends on.
-            return 0;
+            self.overflow_sink = Some(self.nodes.len() as u32);
         }
         self.nodes.push(BuildNode::new(kind, name));
         (self.nodes.len() - 1) as u32

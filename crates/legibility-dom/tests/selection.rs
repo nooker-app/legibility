@@ -901,3 +901,120 @@ fn the_host_output_cap_is_actually_enforced() {
     );
     assert!(json.contains("\"truncated\":false"), "the default profile truncated");
 }
+
+#[test]
+fn a_long_paragraph_is_not_cut_at_the_attribute_limit() {
+    // `push_text` served both attribute values and text nodes, and applied `max_attr_bytes` (64 KiB)
+    // to both. Any text node over that was silently truncated and the loss reported as
+    // `attr_bytes` — a long article lost its ending and blamed an attribute limit for it. Text is
+    // bounded by the document, which `max_input_bytes` already bounds.
+    let para = "word ".repeat(30_000); // ~150 KB in one text node
+    let html = format!(
+        "<html><head><title>Long</title></head><body><main><article><p>{para}</p></article>\
+         </main></body></html>"
+    );
+    let (arena, hit) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let n = out.selection.article.expect("a region");
+    let text = legibility_dom::json::prose_text_excluding(&arena, n, &out.article_exclusions);
+    assert!(
+        text.len() > 100_000,
+        "a {} KB paragraph came back as {} KB",
+        para.len() / 1024,
+        text.len() / 1024
+    );
+    assert!(!hit.attr_bytes, "text truncation was reported as an attribute limit");
+}
+
+#[test]
+fn hitting_the_node_cap_degrades_instead_of_hanging() {
+    // `new_node` returns the document handle as a sink once `max_nodes` is reached, and html5ever
+    // then appends into it. The claim under test is S2's: every limit yields a *valid degraded*
+    // extraction in bounded time, never a hang and never a panic.
+    let mut html = String::from("<html><body><main><article>");
+    for i in 0..5000 {
+        html.push_str(&format!("<div><p>Paragraph {i} of a document with many nodes.</p></div>"));
+    }
+    html.push_str("</article></main></body></html>");
+
+    let tight = Limits { max_nodes: 500, ..Limits::DEFAULT };
+    let (arena, hit) = BuildArena::parse_to_arena(&html, tight);
+    assert!(hit.nodes, "the node cap did not report itself");
+    assert!(arena.len() <= 512, "arena grew past the cap: {}", arena.len());
+    // A degraded extraction is still an extraction: it must answer, either with a region or with a
+    // reason, and it must not panic on the way.
+    let out = legibility_core::extract_all(&arena, tight);
+    assert!(
+        out.selection.article.is_some() || out.selection.no_article.is_some(),
+        "capped input produced neither a region nor a reason"
+    );
+}
+
+#[test]
+fn no_payload_survives_into_a_comment_body() {
+    // `comments[].html` is attacker-controlled input that consumers render, and the demo inserts it
+    // as markup. This is the `UserContent` profile's whole reason to exist (plan §1.8), and it is
+    // checked against real output rather than against the sanitizer's own unit tests — the two can
+    // disagree, and did: `UserContent` "dropped" images by refusing every attribute on `<img>`,
+    // which emitted a bare `<img>`.
+    //
+    // Re-run in particular because `<form>` moved from drop-subtree to unwrap so that old.reddit's
+    // comment bodies survive. Unwrapping keeps the prose and still drops every control inside it.
+    const PAYLOADS: [&str; 15] = [
+        "<script>alert(1)</script>",
+        "<img src=x onerror=alert(1)>",
+        "<a href=\"javascript:alert(1)\">click</a>",
+        "<a href=\"data:text/html,<script>alert(1)</script>\">d</a>",
+        "<svg onload=alert(1)></svg>",
+        "<iframe src=\"https://evil.test\"></iframe>",
+        "<form action=\"https://evil.test\"><input name=\"a\"><button>go</button></form>",
+        "<div id=\"attributes\"></div><div name=\"documentElement\"></div>",
+        "<style>body{display:none}</style>",
+        "<div onclick=\"alert(1)\" style=\"position:fixed\">x</div>",
+        "<object data=\"evil\"></object><embed src=\"evil\">",
+        "<details open><summary>s</summary>hidden</details>",
+        "<a href=\"#x\" ping=\"https://evil.test\">p</a>",
+        "<p>unbalanced</div></p><</p",
+        "<template><script>alert(1)</script></template>",
+    ];
+    let mut html = String::from(
+        "<html><head><title>XSS thread</title></head><body><main>\
+         <article><h1>XSS thread</h1><p>The body of the post, long enough to be the article here \
+         on this page.</p></article><ul class=\"comments\">",
+    );
+    for (i, p) in PAYLOADS.iter().enumerate() {
+        html.push_str(&format!(
+            "<li class=\"c\"><div class=\"meta\"><a class=\"author\" href=\"/u/a{i}\">a{i}</a> \
+             <time datetime=\"2026-08-0{}T10:00:00Z\">Jan</time></div><p>payload {i}:</p>{p}</li>",
+            i % 9
+        ));
+    }
+    html.push_str("</ul></main></body></html>");
+
+    let (arena, hit) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    assert_eq!(out.comments.items.len(), PAYLOADS.len(), "not every payload became a comment");
+    let json = legibility_dom::json::extraction_json_limited(
+        &arena,
+        &out,
+        hit,
+        None,
+        Limits::DEFAULT,
+    );
+    let lower = json.to_lowercase();
+    for banned in [
+        "<script", "onerror", "onload=", "onclick", "javascript:", "data:text", "<iframe",
+        "<object", "<embed", "<form", "<input", "<button", "<style", "<svg", "style=", "ping=",
+    ] {
+        assert!(!lower.contains(banned), "{banned:?} survived into the output");
+    }
+    // DOM clobbering: no `id`/`name` that would shadow a document property.
+    for clobber in ["\"attributes\"", "\"documentelement\"", "\"children\""] {
+        assert!(!lower.contains(clobber), "a clobbering identifier survived: {clobber}");
+    }
+    // Every surviving link is defanged.
+    assert!(
+        !json.contains("<a ") || json.matches("<a ").count() == json.matches("rel=\\\"nofollow noopener noreferrer\\\"").count(),
+        "a comment link came out without the forced rel"
+    );
+}
