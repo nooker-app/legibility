@@ -7,7 +7,7 @@
     "tag":"article",
     "kind":"article",
     "url":null,
-    "prose_len":438,
+    "prose_len":431,
     "confidence":6000,
     "dropped_subtrees":1,
     "unwrapped":1,
@@ -65,7 +65,7 @@
   "group_count":0,
   "diagnostics":{
     "node_count":40,
-    "page_prose_len":460,
+    "page_prose_len":453,
     "page_control_len":0,
     "page_hidden_len":0,
     "page_alt_len":0,

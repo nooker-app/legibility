@@ -8,7 +8,7 @@
     "kind":"article",
     "url":null,
     "prose_len":234,
-    "confidence":7470,
+    "confidence":7511,
     "dropped_subtrees":2,
     "unwrapped":0,
     "truncated":false,
@@ -82,7 +82,7 @@
   "group_count":1,
   "diagnostics":{
     "node_count":61,
-    "page_prose_len":606,
+    "page_prose_len":600,
     "page_control_len":0,
     "page_hidden_len":0,
     "page_alt_len":0,

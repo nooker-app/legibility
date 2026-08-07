@@ -344,23 +344,24 @@ impl Arena {
         for i in (0..n).rev() {
             // Seed from this node's own text, classified by role.
             //
-            // A text node that is nothing but whitespace contributes zero. Indentation is not
-            // content, and counting it is not a rounding error: pretty-printed markup puts a
-            // newline and several spaces between every pair of tags, so each wrapper in a chain
-            // adds bytes that are prose by type and furniture in fact. On a Reddit link post the
-            // body is one anchor inside four nested `<div>`s, and the accumulated indentation
-            // diluted `link_density` from 0.87 at the `<p>` to 0.74 three levels up -- under the
-            // viability floor -- which made a bare URL read as a submission body.
+            // Measured as the text would be *emitted*: whitespace runs collapsed, edges trimmed.
+            //
+            // Indentation is not content, and counting it is not a rounding error. Pretty-printed
+            // markup puts a newline and several spaces between every pair of tags, so each wrapper
+            // in a chain adds bytes that are prose by type and furniture in fact. On a Reddit link
+            // post the body is one anchor inside four nested `<div>`s, and the accumulated
+            // indentation diluted `link_density` from 0.87 at the `<p>` to 0.74 three levels up --
+            // under the viability floor -- which made a bare URL read as a submission body.
+            //
+            // The first version of that fix zeroed a node only when it was whitespace *end to end*,
+            // and counted every byte of one that was not -- so `<p>\n    alpha beta\n  </p>` scored
+            // its indentation as prose while the identical text laid out on one line did not. The
+            // number then described the markup's formatting rather than its text, and it is the
+            // denominator of `purity` and `link_density` and the numerator of `text_share`.
+            // Normalising makes `prose_len` mean the same thing as the string a consumer receives.
             let start = self.text_start.get(i).copied().unwrap_or(0) as usize;
             let end = self.text_end.get(i).copied().unwrap_or(0) as usize;
-            let raw = end.saturating_sub(start);
-            let own = if raw == 0
-                || self.doc_buf.get(start..end).is_some_and(|s| s.chars().all(char::is_whitespace))
-            {
-                0
-            } else {
-                u32::try_from(raw).unwrap_or(u32::MAX)
-            };
+            let own = normalized_len(self.doc_buf.get(start..end).unwrap_or(""));
 
             match self.text_role.get(i).copied().unwrap_or(TextRole::Prose) {
                 TextRole::Prose => add_at(&mut self.prose_len, i, own),
@@ -453,6 +454,30 @@ impl Arena {
         let elems = self.element_count.get(n.idx()).copied().unwrap_or(0);
         crate::num::guarded_div(prose as f32, elems as f32)
     }
+}
+
+/// Byte length of `s` after collapsing whitespace runs to one space and trimming the edges.
+///
+/// The same normalisation the serializer applies when it emits text, computed without allocating —
+/// this runs once per text node on every page.
+fn normalized_len(s: &str) -> u32 {
+    let mut n = 0usize;
+    // Leading whitespace is trimmed, so start as if already inside a run.
+    let mut in_ws = true;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            in_ws = true;
+        } else {
+            if in_ws && n > 0 {
+                // The single space standing in for the run that just ended. Not emitted before the
+                // first character, which is what makes the leading edge trimmed.
+                n += 1;
+            }
+            n += c.len_utf8();
+            in_ws = false;
+        }
+    }
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 #[inline]

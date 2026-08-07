@@ -1029,6 +1029,14 @@ mod tests {
         //
         // Two prose regions with deliberately different densities: one paragraph of text versus
         // the same text spread over four paragraphs (more tags, same characters).
+        //
+        // The unit is long enough that the *edges* of a text node do not dominate the arithmetic.
+        // `prose_len` measures text as it would be emitted — whitespace runs collapsed, edges
+        // trimmed — so a node costs one byte less than its raw span, and duplicating a unit that
+        // ends in a space therefore scales as `11n - 1` rather than `11n`. On an eleven-byte unit
+        // that is a 9% error and the factors visibly disagree; on a realistic paragraph it is
+        // noise. The invariant being checked is that scaling text scales scores together, not that
+        // a two-word fixture does so to the last byte.
         let mk = |unit: &str| {
             format!(
                 "<html><body>\
@@ -1037,8 +1045,9 @@ mod tests {
                  </body></html>"
             )
         };
-        let (a1, _) = parse(&mk("alpha beta "));
-        let (a5, _) = parse(&mk(&"alpha beta ".repeat(5)));
+        let unit = "alpha beta gamma delta epsilon ".repeat(40);
+        let (a1, _) = parse(&mk(&unit));
+        let (a5, _) = parse(&mk(&unit.repeat(5)));
 
         let d1 = div_scores(&a1);
         let d5 = div_scores(&a5);
@@ -1046,8 +1055,13 @@ mod tests {
 
         let f0 = d5[0] / d1[0];
         let f1 = d5[1] / d1[1];
+        // Relative, not absolute. An epsilon on the *difference* of two factors is itself
+        // scale-dependent — the same 1e-3 means one part in 5000 at a factor of 5 and one part in
+        // 50 at a factor of 0.05 — which is the wrong shape of test to put in a scale-invariance
+        // check. What is being asserted is that the two factors are the same number, and "the same"
+        // for a ratio means relative agreement.
         assert!(
-            (f0 - f1).abs() < 1e-3,
+            (f0 - f1).abs() / f0.max(f1) < 1e-3,
             "scores did not scale uniformly: factors {f0} vs {f1} ({d1:?} -> {d5:?})"
         );
         assert!(d1[0] > d1[1], "the denser region must win at 1x: {d1:?}");

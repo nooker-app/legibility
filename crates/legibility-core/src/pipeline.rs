@@ -778,6 +778,7 @@ mod tests {
         // An article ending in a five-item "related posts" block must not be called a listing, no
         // matter how many items that block has.
         let small = Group {
+            member_tag: crate::TagId::DIV,
             paragraph_ratio: 1.0,
             parent: crate::NodeId(0),
             members: alloc::vec![crate::NodeId(1), crate::NodeId(2), crate::NodeId(3)],

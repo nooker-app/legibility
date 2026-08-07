@@ -93,6 +93,12 @@ pub struct Group {
     /// text*, while a comment's author link is a few characters against a paragraph. One number,
     /// and the two shapes fall apart.
     pub mean_max_link_share: f32,
+    /// Tag the members share, when they share one.
+    ///
+    /// A listing is a repeated *template*, and a template is a block: `<li>`, `<div>`, `<article>`,
+    /// `<tr>`. Neither a run of bare `<a>` nor a run of `<p>` is one, and both were being called
+    /// listings — see [`Group::is_listing`].
+    pub member_tag: TagId,
     /// Share of members containing at least one paragraph-level text block.
     ///
     /// The signal that separates a comment from a *timeline event*, which is the S-6 confusion plan
@@ -198,6 +204,20 @@ impl Group {
     #[must_use]
     pub fn is_listing(&self) -> bool {
         if self.by_identity || self.members.len() < MIN_GROUP {
+            return false;
+        }
+        // A listing is a repeated *template*, and a template is a block. Two shapes that are not:
+        //
+        // - **`<p>`** is authored prose by declaration. `lazy-image-2` is one article whose 185
+        //   paragraphs are structurally identical siblings holding 87% of the page, and calling
+        //   that a listing withheld the article entirely — F1 0.987 → **0.000**.
+        // - **bare `<a>`** is a tag cloud or a link run, not items. `archive-of-our-own` carries
+        //   3772 of them at 59% of the page, above the dominance share, while the actual work sits
+        //   in 105 `<p>` below it. Same outcome: 1.000 → **0.000**.
+        //
+        // Both were latent and surfaced when `prose_len` stopped counting indentation, which shrank
+        // wrappers more than it shrank dense text and so raised every group's share.
+        if matches!(self.member_tag, TagId::P | TagId::A) {
             return false;
         }
         // A listing whose items carry authors and timestamps is still a listing if its text lives
@@ -581,6 +601,10 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
         all_members_have_heading: all_headings,
         mean_max_link_share: guarded_div(max_link_share_sum, n),
         mean_first_link_share: guarded_div(first_link_share_sum, n),
+        member_tag: members
+            .first()
+            .and_then(|m| arena.tag.get(m.idx()).copied())
+            .unwrap_or(TagId::UNKNOWN),
         paragraph_ratio: guarded_div(with_paragraph as f32, n),
         members,
         // Structural by default; `identity_group` is the one caller that overrides this.
