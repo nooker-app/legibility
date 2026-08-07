@@ -36,10 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Installed by exact date and used by exact date. No fallback to plain `nightly`: the point
+      # of a pin is that everyone builds with the same compiler, and quietly substituting a
+      # different one turns a reproducible run into a coincidence.
       - name: Nightly toolchain
         run: |
-          rustup toolchain install "$(cat nightly-toolchain.txt)" --profile minimal --component rust-src \
-            || rustup toolchain install nightly --profile minimal --component rust-src
+          NIGHTLY="$(cat nightly-toolchain.txt)"
+          rustup toolchain install "$NIGHTLY" --profile minimal --component rust-src
+          echo "NIGHTLY=$NIGHTLY" >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -54,7 +58,7 @@ jobs:
       - name: Fuzz ${{ matrix.target }}
         working-directory: fuzz
         run: |
-          cargo fuzz run ${{ matrix.target }} -- \
+          cargo "+$NIGHTLY" fuzz run ${{ matrix.target }} -- \
             -max_total_time=900 -rss_limit_mb=2048 -malloc_limit_mb=512 -timeout=5
 
       # A crash is only useful if the input survives the runner.
