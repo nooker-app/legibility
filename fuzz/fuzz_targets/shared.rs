@@ -63,28 +63,87 @@ pub fn assert_tree_is_clean(html: &str) {
         }
     }
 
-    // Attribute checks apply to **tag interiors only**. Scanning the whole string was the first
-    // version and it is wrong twice over: an article may legitimately contain the text
-    // `javascript:alert(1)` inside a code sample, and the fuzzer found a document whose *text* read
-    // ` oN#…='`, which a naive " on"-then-"=" scan reads as an event handler. Text is escaped for
-    // `<` and `&` but is otherwise passed through verbatim, which is the whole point of it.
+    // Attributes are parsed, not substring-matched. Matching the tag interior was the previous
+    // version and the nightly fuzz run refuted it twice in one night:
+    //
+    //     <p lang="…&lt;data:text/html…a/">      reported as a surviving `data:` URL
+    //     <s dir="…style=">                     reported as a surviving `style` attribute
+    //
+    // Both are inert. `lang` and `dir` are not URL-bearing and not executable, so arbitrary text in
+    // their values does nothing at all — a check that flags them is testing the shape of a string
+    // rather than the safety of a document. What actually matters is narrower and needs the two
+    // halves kept apart: which attribute *names* exist, and what the *URL-bearing* ones point at.
     for tag in tag_interiors(html) {
-        let lower = tag.to_ascii_lowercase();
-        for banned in ["javascript:", "data:text/html", "data:image/svg", "srcdoc", "ping=", "style="]
-        {
-            assert!(!lower.contains(banned), "{banned} survived in <{tag}>: {html}");
-        }
-        // Any `on…=` pair, which inside a tag can only be an event handler.
-        let mut rest = lower.as_str();
-        while let Some(at) = rest.find(" on") {
-            rest = &rest[at + 1..];
-            let name_end = rest.find(['=', ' ']).unwrap_or(rest.len());
+        for (name, value) in attributes(tag) {
+            let n = name.to_ascii_lowercase();
+            assert!(!n.starts_with("on"), "event handler {n} survived: {html}");
             assert!(
-                !rest[name_end..].starts_with('='),
-                "an event handler survived in <{tag}>: {html}"
+                !matches!(n.as_str(), "srcdoc" | "ping" | "style" | "formaction"),
+                "{n} survived as an attribute: {html}"
             );
+            if matches!(n.as_str(), "href" | "src" | "action" | "xlink:href" | "data") {
+                let v = value.trim().to_ascii_lowercase();
+                // Entity-encoded schemes decode back on reparse, and the tree we are inspecting is
+                // already reparsed, so a plain prefix test is the right one here.
+                for scheme in ["javascript:", "data:text/html", "data:image/svg", "vbscript:"] {
+                    assert!(!v.starts_with(scheme), "{n}={v} survived: {html}");
+                }
+            }
         }
     }
+}
+
+/// `(name, value)` for every attribute in a tag interior.
+///
+/// Small and forgiving on purpose: this parses what our own serializer emits, which always quotes,
+/// but a malformed tag must yield *something* rather than panic — the input is a fuzzer's.
+fn attributes(tag: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let b: Vec<char> = tag.chars().collect();
+    let mut i = 0usize;
+    // Skip the element name.
+    while i < b.len() && !b[i].is_whitespace() {
+        i += 1;
+    }
+    while i < b.len() {
+        while i < b.len() && (b[i].is_whitespace() || b[i] == '/') {
+            i += 1;
+        }
+        let name_start = i;
+        while i < b.len() && !b[i].is_whitespace() && b[i] != '=' && b[i] != '/' {
+            i += 1;
+        }
+        if i == name_start {
+            break;
+        }
+        let name: String = b[name_start..i].iter().collect();
+        let mut value = String::new();
+        while i < b.len() && b[i].is_whitespace() {
+            i += 1;
+        }
+        if i < b.len() && b[i] == '=' {
+            i += 1;
+            while i < b.len() && b[i].is_whitespace() {
+                i += 1;
+            }
+            if i < b.len() && (b[i] == '"' || b[i] == '\'') {
+                let q = b[i];
+                i += 1;
+                while i < b.len() && b[i] != q {
+                    value.push(b[i]);
+                    i += 1;
+                }
+                i += 1;
+            } else {
+                while i < b.len() && !b[i].is_whitespace() {
+                    value.push(b[i]);
+                    i += 1;
+                }
+            }
+        }
+        out.push((name, value));
+    }
+    out
 }
 
 /// The text between `<` and `>` for every tag in `html`, quotes respected.

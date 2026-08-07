@@ -76,9 +76,23 @@ enum Node {
     },
 }
 
-fn render(n: &Node, out: &mut String, depth: u8) {
-    // Bounded here rather than by the arena's depth cap, so the *generator* cannot spend its whole
-    // budget on one chain and never produce breadth.
+/// How many `render` calls one document may cost.
+///
+/// A depth cap alone is not a bound. `Repeat` nested inside `Repeat` multiplies — twenty-four
+/// repetitions of a subtree that is itself twenty-four repetitions, twenty-four levels deep — so the
+/// *call* count explodes even when every call is cut off before it writes a byte. The nightly fuzz
+/// run found a 36-byte input that spent **31 seconds** here and produced a 55-byte document with an
+/// empty `<body>`: parse and extract took a millisecond between them. The timeout was the harness,
+/// not the engine.
+const RENDER_BUDGET: u32 = 20_000;
+
+fn render(n: &Node, out: &mut String, depth: u8, budget: &mut u32) {
+    if *budget == 0 {
+        return;
+    }
+    *budget -= 1;
+    // Depth still matters — it keeps one chain from consuming the breadth — but the budget above is
+    // what makes the total work finite.
     if depth > 24 || out.len() > 512 * 1024 {
         return;
     }
@@ -111,7 +125,7 @@ fn render(n: &Node, out: &mut String, depth: u8) {
             }
             out.push('>');
             for c in children.iter().take(16) {
-                render(c, out, depth + 1);
+                render(c, out, depth + 1, budget);
             }
             out.push_str("</");
             out.push_str(tag.name());
@@ -119,8 +133,8 @@ fn render(n: &Node, out: &mut String, depth: u8) {
         }
         Node::Repeat { times, item } => {
             for _ in 0..(*times % 24) {
-                render(item, out, depth + 1);
-                if out.len() > 512 * 1024 {
+                render(item, out, depth + 1, budget);
+                if out.len() > 512 * 1024 || *budget == 0 {
                     return;
                 }
             }
@@ -130,7 +144,8 @@ fn render(n: &Node, out: &mut String, depth: u8) {
 
 fuzz_target!(|root: Node| {
     let mut body = String::new();
-    render(&root, &mut body, 0);
+    let mut budget = RENDER_BUDGET;
+    render(&root, &mut body, 0, &mut budget);
     let html = format!("<html><head><title>t</title></head><body>{body}</body></html>");
 
     let limits = Limits::BROWSER;
