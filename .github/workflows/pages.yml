@@ -10,9 +10,10 @@
 #
 # Two smaller disciplines follow from the same worry:
 #
-#   * the default `GITHUB_TOKEN` with `contents: write`, and nothing else. No org-scoped PAT and no
-#     `repository_dispatch`, so there is no credential in this job that *could* write to another
-#     repository even if the steps were wrong.
+#   * the default `GITHUB_TOKEN` with `contents: write` and `pages: read`, and nothing else. No
+#     org-scoped PAT and no `repository_dispatch`, so there is no credential in this job that
+#     *could* write to another repository even if the steps were wrong — and none that could turn
+#     Pages on, which stays a decision a person makes.
 #   * `concurrency` keyed to this workflow in this repo, and a force-push that names `gh-pages`
 #     explicitly rather than relying on a default.
 name: pages
@@ -24,6 +25,9 @@ on:
 
 permissions:
   contents: write
+  # Read-only, and only to tell "Pages was never enabled" apart from "Pages is enabled and broken".
+  # Enabling it is a repository setting and deliberately stays out of this job's reach.
+  pages: read
 
 concurrency:
   group: pages-${{ github.repository }}
@@ -79,13 +83,43 @@ jobs:
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" gh-pages
 
       # Pushing the branch is not publishing. Which branch Pages serves lives in repo settings and
-      # needs `pages: write` plus the Pages API to set or even read — with `contents: write` alone
-      # this job cannot know, so it asks the internet instead of assuming. Without this step the run
-      # goes green on a repo where Pages was never enabled and the summary links to a 404.
+      # this job has no permission to change it — by design, so that a workflow cannot quietly start
+      # publishing a repository that nobody chose to publish.
+      #
+      # That leaves two states, and they need different answers. **Pages was never enabled** is not a
+      # defect in this commit: the bundle is built, guarded and pushed, and there is simply nothing
+      # serving it yet. Failing on it would make the build red until a human acts, and a build that
+      # is permanently red is a build everyone learns to ignore. **Pages is enabled but not serving
+      # our bundle** is a real regression and does fail.
+      #
+      # The first version of this step could not tell them apart, and turned a correct deploy into a
+      # failed run.
       - name: Confirm it is actually served
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           URL=https://nooker-app.github.io/legibility/
+          if ! gh api "repos/${GITHUB_REPOSITORY}/pages" >/tmp/pages.json 2>/dev/null; then
+            {
+              echo "### Bundle pushed to \`gh-pages\` — Pages is not enabled yet"
+              echo
+              echo "Nothing is wrong with this build. To publish, once:"
+              echo "Settings → Pages → Source: *Deploy from a branch*, branch \`gh-pages\`, folder \`/\`."
+              echo
+              echo "Do **not** set a custom domain: GitHub binds one to a single repository, so it"
+              echo "would move \`www.nooker.app\` off \`nooker-web\` and take production down (§1.12.2)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Pages not enabled; bundle is on gh-pages and ready."
+            exit 0
+          fi
+
+          # Enabled. It must serve, and it must not have acquired a custom domain.
+          cname=$(jq -r '.cname // "null"' /tmp/pages.json)
+          if [ "$cname" != "null" ]; then
+            echo "::error::Pages has a custom domain ($cname). See §1.12.2 — this repo must have none."
+            exit 1
+          fi
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
             if [ "$code" = 200 ]; then
@@ -95,10 +129,5 @@ jobs:
             echo "attempt $i: HTTP $code"
             sleep 10
           done
-          {
-            echo "### The bundle was pushed but $URL does not serve it"
-            echo
-            echo "Enable Pages once, by hand: Settings → Pages → Source: *Deploy from a branch*,"
-            echo "branch \`gh-pages\`, folder \`/\`. Do **not** set a custom domain — see §1.12.2."
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::Pages is enabled but $URL does not serve the bundle"
           exit 1
