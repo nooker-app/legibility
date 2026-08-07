@@ -1018,3 +1018,44 @@ fn no_payload_survives_into_a_comment_body() {
         "a comment link came out without the forced rel"
     );
 }
+
+#[test]
+fn a_page_whose_article_is_body_itself_is_not_a_refusal() {
+    // Ten of the 130 corpus pages returned no article, and eight of them for one reason: the
+    // document has no `<div>`, `<article>`, `<main>` or `<section>` at all, so the `<p>` elements
+    // are `<body>`'s own children and `<body>` *is* the article. `lgb explain` reported
+    // `candidates 0` on pages of 221 bytes and of 202 KB alike — nothing was small, there was
+    // nothing to compare against.
+    let mut html = String::from("<html><head><title>A Plain Post</title></head><body>");
+    html.push_str("<h1>A Plain Post</h1>");
+    for i in 0..8 {
+        html.push_str(&format!(
+            "<p>Paragraph {i}. Under sufficiently extreme conditions quarks may become deconfined \
+             and exist as free particles, which is the subject of this post.</p>"
+        ));
+    }
+    html.push_str("</body></html>");
+    let (_, text, _) = extract(&html);
+    assert!(text.contains("deconfined"), "a body-only article was refused: {text:?}");
+
+    // And it stays a last resort: a page with a real container must still choose the container,
+    // never `<body>`, or the silent fallback that defect 1 exists to remove is back.
+    let wrapped = "<html><head><title>Wrapped</title></head><body>\
+        <nav><a href=/a>one</a><a href=/b>two</a><a href=/c>three</a></nav>\
+        <article><p>The article's own paragraph, which is where the prose actually lives on \
+          this page and should be chosen over the body.</p>\
+        <p>A second paragraph so the region is not a single block.</p></article>\
+        </body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(wrapped, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let tag = out.selection.article.and_then(|n| arena.tag_name(n)).unwrap_or("none");
+    assert_eq!(tag, "article", "body was chosen over a real container");
+
+    // A page of pure navigation is still refused: the viability floor applies to `<body>` too.
+    let navonly = "<html><head><title>Links</title></head><body>\
+        <a href=/a>one</a><a href=/b>two</a><a href=/c>three</a><a href=/d>four</a>\
+        </body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(navonly, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    assert!(out.selection.article.is_none(), "a page of links came back as an article");
+}

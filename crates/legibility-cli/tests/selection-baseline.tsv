@@ -4,7 +4,7 @@
 002	0.9972
 003-metadata-preferred	1.0000
 004-metadata-space-separated-properties	1.0000
-005-unescape-html-entities	0.0000
+005-unescape-html-entities	1.0000
 aclu	0.9992
 aktualne	0.9234
 archive-of-our-own	1.0000
@@ -26,7 +26,7 @@ cnet-svg-classes	0.9386
 cnn	0.9733
 comment-inside-script-parsing	0.9922
 daringfireball-1	1.0000
-data-url-image	0.0000
+data-url-image	1.0000
 dev418	0.0377
 dropbox-blog	0.9903
 ebb-org	0.9702
@@ -45,7 +45,7 @@ herald-sun-1	0.8470
 hidden-nodes	0.0000
 hukumusume	0.5410
 iab-1	0.9984
-ietf-1	0.0000
+ietf-1	0.9870
 invalid-attributes	1.0000
 js-link-replacement	0.0000
 keep-images	0.9924
@@ -60,14 +60,14 @@ lifehacker-post-comment-load	0.9441
 lifehacker-working	0.9364
 links-in-tables	0.9990
 lwn-1	0.9963
-mathjax	0.0000
+mathjax	0.9948
 medicalnewstoday	0.9896
 medium-1	0.9928
 medium-2	0.9633
 medium-3	0.9987
 mercurial	0.9440
 metadata-content-missing	1.0000
-missing-paragraphs	0.0000
+missing-paragraphs	1.0000
 mozilla-1	0.8974
 mozilla-2	1.0000
 msn	1.0000
@@ -86,7 +86,7 @@ remove-aria-hidden	0.9863
 remove-extra-brs	0.9922
 remove-extra-paragraphs	0.9922
 remove-script-tags	0.9922
-reordering-paragraphs	0.0000
+reordering-paragraphs	1.0000
 replace-brs	0.9922
 replace-font-tags	1.0000
 royal-road	0.9787
@@ -101,7 +101,7 @@ simplyfound-1	0.4260
 social-buttons	0.9943
 spiceworks	0.9837
 style-tags-removal	1.0000
-svg-parsing	0.0000
+svg-parsing	1.0000
 table-style-attributes	0.4337
 telegraph	0.9470
 theverge	0.9056

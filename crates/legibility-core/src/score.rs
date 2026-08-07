@@ -95,9 +95,9 @@ const MIN_COMPETITORS: u32 = 3;
 
 /// Container elements that can be an article region.
 ///
-/// `<body>` and `<html>` are absent on purpose: selecting `<body>` is the silent fallback that
-/// defect 1 exists to remove. If nothing else qualifies the answer is [`NoArticle`], not the
-/// whole page.
+/// `<html>` is absent on purpose, and `<body>` is admitted **only when nothing else is**: selecting
+/// `<body>` as a matter of course is the silent fallback defect 1 exists to remove. See
+/// [`body_as_last_resort`] for the case where it is not a fallback but the only correct answer.
 fn is_candidate_tag(tag: TagId) -> bool {
     matches!(
         tag,
@@ -111,6 +111,63 @@ fn is_candidate_tag(tag: TagId) -> bool {
             | TagId::DL
             | TagId::TABLE
     )
+}
+
+/// `<body>` scored as a candidate, for the page that has no other.
+///
+/// # Why this is not the fallback it looks like
+///
+/// Ten of the 130 corpus pages returned no article at all, and eight of them for one reason: the
+/// document has no `<div>`, `<article>`, `<main>` or `<section>` anywhere, so the `<p>` elements are
+/// `<body>`'s own children and **`<body>` is the article**. `lgb explain` reported `candidates 0` on
+/// pages of 221 bytes and of 202 KB alike. Nothing was small; there was nothing to compare against.
+///
+/// Plan §M4 already distinguishes the two states this confuses. Returning `<body>` because the
+/// scorer gave up is the silent fallback defect 1 exists to remove. Returning it because it is the
+/// only container the author wrote is a legitimate argmax — there is no narrower claim available,
+/// and the viability floor still applies, so a page of pure navigation is still refused.
+///
+/// Reached only when the candidate list is empty, so no page that already had an answer can change
+/// its answer here.
+fn body_as_last_resort(arena: &Arena, masked_prose: &[u32]) -> Vec<Candidate> {
+    let Some(body) = (0..arena.len()).find(|&i| {
+        arena.kind.get(i).copied() == Some(NodeKind::Element)
+            && arena.tag.get(i).copied() == Some(TagId::BODY)
+    }) else {
+        return Vec::new();
+    };
+    let masked = masked_prose.get(body).copied().unwrap_or(0);
+    let prose = arena
+        .prose_len
+        .get(body)
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(masked);
+    if prose == 0 {
+        return Vec::new();
+    }
+    let control = arena.control_len.get(body).copied().unwrap_or(0);
+    let hidden = arena.hidden_len.get(body).copied().unwrap_or(0);
+    let alt = arena.alt_len.get(body).copied().unwrap_or(0);
+    let all_text = prose
+        .saturating_add(control)
+        .saturating_add(hidden)
+        .saturating_add(alt);
+    let node = NodeId(body as u32);
+    let link_density = arena.link_density(node).clamp(0.0, 1.0);
+    let purity = guarded_div(prose as f32, all_text as f32);
+    // `text_share` is 1.0 by definition here: `<body>` holds all of the page's prose. That is
+    // exactly why share alone can never be the ranking signal, and exactly why this function is
+    // gated on there being nothing else to rank.
+    let density = arena.text_density(node);
+    alloc::vec![Candidate {
+        node,
+        text_share: 1.0,
+        density,
+        link_density,
+        purity,
+        evidence: density * (1.0 - link_density) * purity,
+    }]
 }
 
 /// Collect and score every candidate, then compute the page-relative statistics.
@@ -402,6 +459,14 @@ pub fn select_article(arena: &Arena) -> Selection {
 #[must_use]
 pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
     let (cands, stats) = collect_masked(arena, masked_prose);
+
+    // Nothing containerish held prose. Before concluding there is no article, ask whether the
+    // article simply *is* `<body>` -- see [`body_as_last_resort`].
+    let cands = if cands.is_empty() {
+        body_as_last_resort(arena, masked_prose)
+    } else {
+        cands
+    };
 
     if cands.is_empty() {
         // Zero candidates means no container held any prose at all -- an empty page, an error
