@@ -18,7 +18,7 @@ browser demo runs. Choosing it costs nothing and removes the entire packaging ch
 python3 scripts/build-offline-demo.py --template reader js/reader/reader-bundled.html
 ```
 
-Add the result to the app bundle as a resource. It is ~900 KB, of which ~660 KB is the engine as
+Add the result to the app bundle as a resource. It is ~900 KB, of which most is the engine as
 base64. Nothing else ships.
 
 ## Load it
@@ -65,8 +65,7 @@ func render(html: String) async throws -> Summary {
 | `window.legibility.extract(html)` | extract only, resolves with the full canonical JSON |
 | `window.legibility.build` | which engine this page carries, e.g. `9140cfa · wasm 18fcdb90` |
 
-The module is instantiated once and reused, so rendering a second article does not recompile
-665 KB.
+The module is instantiated once and reused, so rendering a second article does not recompile it.
 
 ## Keep navigation inside the app
 

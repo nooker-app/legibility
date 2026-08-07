@@ -23,37 +23,96 @@ itself is built around four things Readability.js structurally cannot do:
    single reverse pass for all subtree sums — which removes the quadratic inner-text
    recomputation. No document cloning, no retry ladder.
 
+## Use it
+
+Three ways, all working today. Start with [`docs/output-schema.md`](docs/output-schema.md) — it is
+the contract every one of them returns.
+
+### In a browser, or a browser extension
+
+A WebAssembly module with five exports and forty lines of glue:
+[`docs/embedding-web.md`](docs/embedding-web.md).
+
+```sh
+cargo build --release -p legibility-wasm --target wasm32-unknown-unknown
+```
+
+### In an iOS or macOS app
+
+Inside a `WKWebView`, which is full WebKit and runs WebAssembly normally — so this needs no C ABI, no
+`xcframework` and no Swift package. One ~900 KB file in the app bundle and three calls on
+`window.legibility`: [`docs/embedding-ios.md`](docs/embedding-ios.md).
+
+```sh
+python3 scripts/build-offline-demo.py --template reader js/reader/reader-bundled.html
+```
+
+### From the command line
+
+```sh
+cargo build --release -p legibility-cli
+./target/release/lgb extract page.html          # canonical JSON
+./target/release/lgb text page.html             # the article's text
+./target/release/lgb explain page.html          # why that region, or why none
+./target/release/lgb explain page.html --region # what is inside the chosen region
+```
+
+`explain` is the one to reach for when the answer is wrong. It prints the candidate table — the four
+factors, which candidates cleared the viability floor, and which won — so "no article" and "the wrong
+article" are answered by the same output.
+
 ## Try it
 
-Two demos, because one of them cannot do what the other can.
+<https://nooker-app.github.io/legibility/> — the engine runs in your browser; nothing is uploaded.
 
-**Offline, single file, no server.** The WebAssembly module is embedded in the HTML as base64, so it
-runs from `file://` — double-click it, mail it, use it on a plane.
+Locally, either as a single file with no server at all:
 
 ```sh
 python3 scripts/build-offline-demo.py     # -> js/testbed/legibility-offline.html
 open js/testbed/legibility-offline.html
 ```
 
-Paste HTML or drop a `.html` file. There is **no URL input**: a page opened from disk cannot fetch a
-third-party site, because CORS forbids it and no client-side code changes that. Verify the offline
-claim rather than taking it — `scripts/verify-offline-demo.sh` loads the file in headless Chrome from
-`file://` and asserts the extraction is correct.
-
-**Local server, with URL fetching.** The fetch happens server-side, where CORS does not apply.
+or with a helper that can fetch URLs for you, which a page cannot do for itself:
 
 ```sh
-cargo run --release -p legibility-cli -- serve   # http://127.0.0.1:8080
+cargo run --release -p legibility-cli -- serve   # http://127.0.0.1:8899
 ```
 
-Both go through the same serializer (`legibility_dom::json`), so their output is byte-identical to
-`lgb extract` — the determinism gate compares them.
+Both go through the same serializer, so their output is byte-identical to `lgb extract` — the
+determinism gate compares them.
 
 ## Status
 
-Pre-alpha. M0 (skeleton, disciplines, probes) is in progress; nothing here extracts anything
-useful yet. See `docs/adr/` for the decisions already settled, and `docs/limits.md` for what v1
-deliberately does not do.
+**Extraction works and is measured.** On mozilla/readability's 130-page corpus, token-F1 of the
+selected region against their `expected.html`:
+
+| | |
+|---|---|
+| mean | **0.914** |
+| median | 0.989 |
+| ≥ 0.95 | 92 pages (71%) |
+| < 0.80 | 13 pages (10%) |
+| returns no article | 3 pages (2.3%) |
+
+What is proven, and by which gate on every push:
+
+- **No panic, no hang, no unbounded allocation** on any input — five fuzz targets, and every limit
+  degrades to a smaller valid result rather than an error.
+- **Byte-identical output across targets** — native vs `wasm32-wasip1`, compared over all 130 corpus
+  pages plus fixtures on every CI run. This was silently false for 123 of them until the sink stopped
+  letting tokenizer chunking become arena shape.
+- **Nothing dangerous in the output** — fifteen payload families asserted against real output, and
+  both sanitizer profiles fuzzed independently for reparse-fixpoint and mXSS.
+- **A per-page quality ratchet.** No page may fall below what it last scored.
+
+What is **not** proven: *"better than Readability.js."* That claim needs the `legibility-legacy`
+oracle and the `LOSSES` parity anchor, and neither exists yet — the comparison above is against
+`expected.html`, which the plan classes as advisory. Also absent: site adapters, the community and
+a11y corpora, and a published package for either npm or crates.io.
+
+Known rough edges are named rather than hidden: `docs/limits.md` for what v1 deliberately does not
+do, and `crates/legibility-cli/tests/anchor_band.rs` for the pages this work knowingly made worse and
+why.
 
 ## Layout
 
@@ -63,11 +122,11 @@ deliberately does not do.
 | `legibility-core` | engine. `no_std + alloc`, no parser, no clock, no I/O |
 | `legibility-dom` | the sole html5ever consumer; owns the SoA `TreeSink` |
 | `legibility-sanitize` | output sanitizer, two profiles (article vs user content) |
-| `legibility-adapters` | site adapters; may only adjust confidence, never override |
-| `legibility-metrics` | quality metrics, pure |
-| `legibility-legacy` | Readability.js `parse()` port, used as an oracle |
-| `legibility-ffi` | C ABI for the iOS static library |
-| `legibility-wasm` | wasm-bindgen wrapper |
+| `legibility-adapters` | site adapters; may only adjust confidence, never override — **stub** |
+| `legibility-metrics` | quality metrics, pure — **stub** |
+| `legibility-legacy` | Readability.js `parse()` port, used as an oracle — **stub** |
+| `legibility-ffi` | C ABI for a native static library — **stub**; the iOS path is the web view |
+| `legibility-wasm` | the browser module: five `extern "C"` exports, no wasm-bindgen |
 | `legibility-cli` | the `lgb` binary |
 
 ## License
