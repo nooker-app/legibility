@@ -80,12 +80,49 @@ driver = (
 pathlib.Path(sys.argv[2]).write_text(page + driver, encoding="utf-8")
 PY
 
-# `--enable-logging=stderr` so a page that never runs says why. Without it a CSP refusal, a missing
-# file and a crashed renderer are the same eight failing assertions.
-"$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
-  --enable-logging=stderr --log-level=0 \
-  --virtual-time-budget=25000 --dump-dom "file://$TMP/drive.html" \
+# Two transports, because they answer different questions and only one of them is reliable to
+# snapshot.
+#
+# `--dump-dom` takes a single snapshot, and `--virtual-time-budget` advances *virtual* time — it
+# does not wait on real CPU work, and compiling 667 KB of WebAssembly is real CPU work. On a fast
+# machine the render lands first; on a CI runner it does not, and the snapshot catches an empty
+# page. That produced eight identical failures with nothing in the console to explain them.
+#
+# So the *behaviour* is asserted over http, served locally, which is what the gh-pages verifier
+# already does reliably in CI. And `file://` — the transport a WKWebView actually uses, via
+# `loadFileURL` — is asserted separately and narrowly: that the page initializes there at all, which
+# is the only part that can differ by origin. The CSP refusal that broke this page originally would
+# still be caught, because it stops initialization.
+PORT="${2:-8931}"
+python3 -m http.server "$PORT" --directory "$TMP" >/dev/null 2>&1 &
+server=$!
+trap 'kill $server 2>/dev/null; rm -rf "$TMP"' EXIT
+for _ in $(seq 1 40); do
+  curl -fsS -o /dev/null "http://127.0.0.1:$PORT/drive.html" 2>/dev/null && break
+  sleep 0.25
+done
+
+"$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
+  --virtual-time-budget=25000 --dump-dom "http://127.0.0.1:$PORT/drive.html" \
   >"$TMP/dom.html" 2>"$TMP/console.log"
+
+# `file://` only has to get as far as exposing the API; the CSP is what could stop it.
+cat > "$TMP/init.html" <<'INIT'
+<script>window.addEventListener("load", () => {
+  document.title = "INIT " + (typeof window.legibility === "object" ? "ok" : "missing");
+});</script>
+INIT
+cat "$FILE" "$TMP/init.html" > "$TMP/fileprobe.html"
+"$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
+  --virtual-time-budget=15000 --dump-dom "file://$TMP/fileprobe.html" \
+  >"$TMP/filedom.html" 2>/dev/null
+if grep -q "INIT ok" "$TMP/filedom.html"; then
+  say PASS "initializes from file:// (the transport a WKWebView loads)"
+else
+  say FAIL "does not initialize from file://; a WKWebView would show nothing"
+  grep -iE 'refused|denied|csp|security' "$TMP/console.log" 2>/dev/null | head -3 | sed 's/^/        /'
+  fail=1
+fi
 
 if python3 - "$TMP/dom.html" <<'PY'
 import json, re, sys
