@@ -43,7 +43,10 @@ if [ ! -x "$CHROME" ]; then
   exit "$fail"
 fi
 
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+# Inside the repository, not /tmp. A snap-confined Chromium — which is what `chromium-browser`
+# resolves to on some Linux images — cannot read outside the user's home, so a driver in /tmp loads
+# as a blank page and every assertion below fails at once with no hint as to why.
+TMP=$(mktemp -d "$PWD/.reader-verify-XXXXXX"); trap 'rm -rf "$TMP"' EXIT
 # A self-authored article, so this needs no corpus and commits no third-party HTML (D9).
 python3 - "$FILE" "$TMP/drive.html" <<'PY'
 import json, sys, pathlib
@@ -77,8 +80,12 @@ driver = (
 pathlib.Path(sys.argv[2]).write_text(page + driver, encoding="utf-8")
 PY
 
+# `--enable-logging=stderr` so a page that never runs says why. Without it a CSP refusal, a missing
+# file and a crashed renderer are the same eight failing assertions.
 "$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
-  --virtual-time-budget=25000 --dump-dom "file://$TMP/drive.html" >"$TMP/dom.html" 2>/dev/null
+  --enable-logging=stderr --log-level=0 \
+  --virtual-time-budget=25000 --dump-dom "file://$TMP/drive.html" \
+  >"$TMP/dom.html" 2>"$TMP/console.log"
 
 if python3 - "$TMP/dom.html" <<'PY'
 import json, re, sys
@@ -106,7 +113,12 @@ for name, ok in checks:
 sys.exit(1 if [n for n, ok in checks if not ok] else 0)
 PY
 then say PASS "renders a full reader view in a browser"
-else say FAIL "see the per-check list above"; fail=1
+else
+  say FAIL "see the per-check list above"
+  # The browser's own account of it, which is the difference between "the page is wrong" and "the
+  # page never loaded".
+  grep -iE 'error|refused|denied|csp|security' "$TMP/console.log" 2>/dev/null | head -5 | sed 's/^/        /'
+  fail=1
 fi
 
 echo

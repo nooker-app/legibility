@@ -363,6 +363,15 @@ pub fn namespace_id<P: Profile>(id: &str) -> String {
 }
 
 /// Escape text for an HTML text node.
+///
+/// U+FEFF is dropped rather than escaped. At the start of a document it is a byte-order mark and
+/// the parser removes it; anywhere else it is ZERO WIDTH NO-BREAK SPACE, which renders as nothing
+/// and which Unicode has deprecated for that use. Either way it is not content.
+///
+/// Emitting it made sanitization fail to converge, and a fuzz case found the shape: the parser
+/// strips one leading thing per pass, so ` \u{feff}x` came back as `\u{feff}x`, then as `x` — three
+/// rounds to settle where the contract allows two. Not escaping it and not emitting it removes the
+/// step entirely, rather than widening the bound until the symptom fits.
 #[must_use]
 pub fn escape_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -371,6 +380,7 @@ pub fn escape_text(s: &str) -> String {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
+            '\u{feff}' => {}
             _ => out.push(c),
         }
     }

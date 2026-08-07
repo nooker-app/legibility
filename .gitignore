@@ -29,3 +29,4 @@ js/testbed/legibility-offline.html
 # Reader-view bundle: a build product of scripts/build-offline-demo.py --template reader, and
 # another ~900 KB of base64 that would land in a permanent history on every engine change.
 js/reader/reader-bundled.html
+.reader-verify-*
