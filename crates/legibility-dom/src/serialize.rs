@@ -211,6 +211,18 @@ pub fn serialize_region_excluding<P: Profile>(
                         write_attrs::<P>(arena, i, name, &mut out, &mut report);
                         out.push('>');
 
+                        // A newline immediately after `<pre>` is dropped when the output is parsed
+                        // again -- the tree construction spec says to ignore it -- so emitting the
+                        // content verbatim loses one newline per round and the result never settles.
+                        // A fuzz case caught exactly that: `<pre>\n\n\n…` came back with two
+                        // newlines, then one, then none.
+                        //
+                        // The serialization spec's own answer, for the same reason: emit an extra
+                        // one, which the reparse then eats, leaving the content unchanged.
+                        if starts_with_newline(arena, i, end) {
+                            out.push('\n');
+                        }
+
                         if is_void(name) {
                             continue;
                         }
@@ -389,6 +401,21 @@ fn collapse_into(result: &mut String, chunk: &str) {
         rest = tail.trim_start_matches([' ', '\t', '\r', '\n']);
     }
     result.push_str(rest);
+}
+
+/// Whether `i` is a `<pre>`-like element whose first text begins with a newline.
+///
+/// `pre`, `textarea` and `listing` are the three elements whose parse drops a leading newline, so
+/// they are the three that need one added back on the way out.
+fn starts_with_newline(arena: &Arena, i: usize, end: usize) -> bool {
+    if !matches!(arena.tag_name(NodeId(i as u32)), Some("pre" | "textarea" | "listing")) {
+        return false;
+    }
+    // The first descendant carrying text, which for these elements is their own text child.
+    let sub_end = (arena.subtree_end.get(i).copied().unwrap_or(0) as usize).min(end);
+    (i + 1..sub_end)
+        .find(|&d| arena.kind.get(d).copied() == Some(NodeKind::Text))
+        .is_some_and(|d| arena.own_text(NodeId(d as u32)).starts_with('\n'))
 }
 
 /// Direct children of `i` within `[i+1, end)`.

@@ -1164,3 +1164,44 @@ fn a_pointer_must_be_mostly_headline_and_link_or_it_is_an_article() {
     assert_eq!(url, "https://github.com/free-news-api/news-api");
     assert_eq!(text, "", "a pointer must have an empty body, got: {text}");
 }
+
+#[test]
+fn a_pre_block_survives_being_serialized_twice() {
+    // The tree-construction spec drops a newline that immediately follows `<pre>`, so serializing a
+    // code block verbatim loses one newline every time the output is parsed again — `<pre>\n\n\n…`
+    // comes back with two, then one, then none, and the sequence never settles. Found by
+    // `sanitize_roundtrip_ugc` in CI, not locally: a 45-second run had missed it, a 60-second one
+    // did not.
+    //
+    // The serialization spec's own remedy is to emit an extra newline, which the reparse then eats.
+    let html = "<html><head><title>Recursion</title></head><body><main><article>\
+        <p>The naive implementation is the standard teaching example, and it is also the standard \
+          example of why memoisation exists at all.</p>\
+        <pre><code>\n\n\ndef f(n):\n    if n &lt; 2:\n        return n\n</code></pre>\
+        <p>Each call spawns two more, so the tree of calls doubles at every level.</p>\
+        </article></main></body></html>";
+
+    let once = serialize_article(html);
+    let twice = serialize_article(&once);
+    assert_eq!(once, twice, "serializing our own output changed the <pre> block");
+    assert!(
+        once.contains("\n\n\ndef f(n):"),
+        "the code block lost its leading blank lines: {once}"
+    );
+    assert!(once.contains("    if n &lt; 2:"), "the code block lost its indentation: {once}");
+}
+
+/// The article region of `html`, serialized through the `Article` profile.
+fn serialize_article(html: &str) -> String {
+    let (arena, _) = BuildArena::parse_to_arena(html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let Some(n) = out.selection.article else { return String::new() };
+    let (h, _) =
+        legibility_dom::serialize::serialize_region_excluding::<legibility_sanitize::Article>(
+            &arena,
+            n,
+            legibility_dom::serialize::SerializeOptions::default(),
+            &out.article_exclusions,
+        );
+    h.as_str().to_string()
+}
