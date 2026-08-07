@@ -27,10 +27,22 @@ if not re.fullmatch(r"[A-Za-z0-9+/=]*", payload) or len(payload) < 100_000:
     print(f"        payload absent, malformed, or implausibly small ({len(payload)} chars)")
     sys.exit(1)
 
-# The guard is what makes the fetch unreachable once the payload is present. Without it, a
-# substituted payload would still be ignored.
-if "if (EMBEDDED) return b64ToBytes(WASM_BASE64);" not in src:
+# What makes the fetch unreachable once the payload is present. Two page shapes satisfy this, and
+# the check is about the property rather than about either of them:
+#
+#   * the demo has two delivery routes and picks the payload first, so the guard is the branch;
+#   * the reader view has no network route at all, which is the stronger form — there is no fetch
+#     of a module to be preferred over.
+#
+# Requiring the demo's exact line failed the reader page while every behavioural check passed, which
+# is a guard describing one implementation rather than the thing being guarded.
+prefers_payload = "if (EMBEDDED) return b64ToBytes(WASM_BASE64);" in src
+fetches_module = re.search(r'fetch\(\s*["\'`][^"\'`]*\.wasm', src) is not None
+if fetches_module and not prefers_payload:
     print("        the embedded payload is not preferred over the network route")
     sys.exit(1)
 
-print(f"        {len(payload) // 1024} KB of base64 embedded, network route unreachable")
+print(
+    f"        {len(payload) // 1024} KB of base64 embedded, "
+    + ("network route unreachable" if fetches_module else "no network route in the page")
+)

@@ -67,6 +67,16 @@ jobs:
       - name: Corpus ratchet
         run: cargo test -p legibility-cli --release --test anchor_band
 
+      # The reader view is what an iOS or macOS app loads into a WKWebView, and only a browser can
+      # say whether it works: its first version was refused by its own Content-Security-Policy,
+      # because compiling WebAssembly counts as evaluation. A grep would have called that fine.
+      - name: Reader view
+        run: |
+          rustup target add wasm32-unknown-unknown
+          sudo apt-get update && sudo apt-get install -y binaryen
+          python3 scripts/build-offline-demo.py --template reader js/reader/reader-bundled.html
+          scripts/verify-reader.sh
+
       - name: Formatting
         run: cargo fmt --all -- --check
 

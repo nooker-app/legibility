@@ -1,0 +1,218 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- No script may be loaded, no frame embedded, nothing fetched. The engine is inline and the
+     article is attacker-controlled, so the page states what it is allowed to do rather than
+     relying on the host to police it. `script-src 'unsafe-inline'` is the one concession: the
+     module and its glue are inlined, which is also what makes the page work from a `null` origin
+     inside a WKWebView. -->
+<!-- `wasm-unsafe-eval` and not `unsafe-eval`: compiling a WebAssembly module counts as evaluation
+     to the CSP, so without it `WebAssembly.instantiate` is refused outright — which is how this
+     page first shipped, rendering nothing but the browser's own error. The narrow directive permits
+     the module and still forbids `eval()` on JavaScript. Chrome 97+, Safari 16.4+ (iOS 16.4+). -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval';
+               style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none';
+               frame-ancestors 'none'">
+<title>Reader</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #16181d; --bg: #fbfbf9; --dim: #6b7280; --rule: #0002; --accent: #2f6f4f;
+    --measure: 34rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e6e6e6; --bg: #16181d; --dim: #9aa0aa; --rule: #fff2; --accent: #7fc4a0; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 1.0625rem/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+    /* The notch and the home indicator, so a full-screen WKWebView does not clip the text. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--measure); margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+  h1.title { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .5rem; letter-spacing: -0.01em; }
+  .byline { color: var(--dim); font-size: .875rem; margin: 0 0 1.75rem; }
+  .byline a { color: inherit; }
+  article { overflow-wrap: break-word; }
+  article :is(h1,h2,h3,h4,h5,h6) { line-height: 1.3; margin: 2rem 0 .6rem; }
+  article h1 { font-size: 1.35rem; } article h2 { font-size: 1.2rem; }
+  article h3 { font-size: 1.05rem; }
+  article p, article ul, article ol, article blockquote { margin: 0 0 1.15rem; }
+  article :is(ul,ol) { padding-left: 1.4rem; }
+  article li { margin: .3rem 0; }
+  article a { color: var(--accent); text-underline-offset: .15em; }
+  article img { max-width: 100%; height: auto; display: block; margin: 1.4rem auto; border-radius: 4px; }
+  article figure { margin: 1.6rem 0; }
+  article figcaption { color: var(--dim); font-size: .85rem; text-align: center; margin-top: .5rem; }
+  article blockquote {
+    border-left: 3px solid var(--rule); padding-left: 1rem; margin-left: 0; color: var(--dim);
+  }
+  /* Code must not force the page to scroll sideways: the block scrolls, the article does not. */
+  article pre {
+    overflow-x: auto; background: #8881; padding: .85rem 1rem; border-radius: 6px;
+    font-size: .875rem; line-height: 1.5; -webkit-overflow-scrolling: touch;
+  }
+  article :not(pre) > code { background: #8881; padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  article table { display: block; overflow-x: auto; border-collapse: collapse; font-size: .9rem; }
+  article :is(td,th) { border: 1px solid var(--rule); padding: .35rem .6rem; }
+  hr.sep { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0 1.5rem; }
+  h2.section { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 1rem; }
+  ol.comments { list-style: none; padding: 0; margin: 0; }
+  ol.comments > li { border-left: 2px solid var(--rule); padding: .1rem 0 .1rem .8rem; margin: 1rem 0; }
+  .cmeta { color: var(--dim); font-size: .8rem; margin-bottom: .2rem; }
+  .cbody :is(p,ul,ol,pre,blockquote) { margin: .45rem 0; }
+  .cbody :is(ul,ol) { padding-left: 1.2rem; }
+  .note { color: var(--dim); font-size: .9rem; }
+  .err { color: #c33; white-space: pre-wrap; }
+</style>
+
+<main id="root"><p class="note" id="status">Ready.</p></main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------------------------
+// Reader view. One self-contained file: the WebAssembly engine is inlined as base64, so this page
+// runs from `file://`, from a `null` origin inside a WKWebView, and from a static host, with no
+// network access of any kind.
+//
+// The host — a Swift app, a browser extension — supplies the HTML. This page never fetches: it has
+// no way to, and the CSP above says so. That is the whole security story for embedding it, because
+// the article being rendered is attacker-controlled and the page it is rendered in can do nothing.
+//
+// See docs/embedding-ios.md for the WKWebView side.
+// ---------------------------------------------------------------------------------------------
+const WASM_BASE64 = "/*__WASM_BASE64__*/";
+const BUILD_STAMP = "/*__BUILD_STAMP__*/";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+let wasm = null;
+let ready = null;
+
+// Instantiated once and reused. A WKWebView that renders one article after another should not pay
+// 665 KB of compilation per article.
+function init() {
+  if (ready) return ready;
+  ready = WebAssembly.instantiate(b64ToBytes(WASM_BASE64), {}).then(({ instance }) => {
+    wasm = instance.exports;
+    return wasm;
+  });
+  return ready;
+}
+
+/// Extract, without rendering. Returns the engine's canonical JSON as an object.
+function extract(html) {
+  const enc = new TextEncoder().encode(html);
+  const ptr = wasm.lgb_alloc(enc.length);
+  if (ptr === 0) throw new Error("out of memory for a document this size");
+  new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
+  const res = wasm.lgb_extract(ptr, enc.length);
+  if (res === 0) throw new Error("extraction returned no result");
+  // The module's ABI: a 4-byte little-endian length, then that many bytes of UTF-8 JSON. Copied
+  // out before `lgb_free_result`, because the view is into the module's own linear memory and any
+  // later allocation may move it.
+  const len = new DataView(wasm.memory.buffer, res, 4).getUint32(0, true);
+  const json = new TextDecoder("utf-8").decode(
+    new Uint8Array(wasm.memory.buffer, res + 4, len)
+  );
+  wasm.lgb_free_result();
+  return JSON.parse(json);
+}
+
+function renderInto(root, d) {
+  const a = d.article;
+  const m = d.metadata || {};
+  const title = (m.title_without_site_name && m.title_without_site_name.value)
+    || (m.title && m.title.value) || "";
+  const authors = (m.authors || []).map((x) => x.value).filter(Boolean);
+  const when = (m.published && (m.published.raw || m.published.iso8601)) || "";
+
+  // A link submission has no body of its own. Rendering an empty page would read as a failure, so
+  // render what the page actually is: a headline that points somewhere.
+  if (a && a.kind === "discussion-root") {
+    root.innerHTML =
+      (title ? `<h1 class="title">${esc(title)}</h1>` : "") +
+      `<p class="byline">${[authors.join(", "), when].filter(Boolean).map(esc).join(" · ")}</p>` +
+      (a.url ? `<p><a href="${esc(a.url)}" rel="noreferrer">${esc(a.url)}</a></p>` : "") +
+      `<p class="note">A link submission: no body of its own.</p>`;
+  } else if (a && a.html) {
+    root.innerHTML =
+      (title ? `<h1 class="title">${esc(title)}</h1>` : "") +
+      ([authors.join(", "), when].filter(Boolean).length
+        ? `<p class="byline">${[authors.join(", "), when].filter(Boolean).map(esc).join(" · ")}</p>`
+        : "") +
+      // Sanitized by `Profile::Article` inside the engine; the CSP above is the second line.
+      `<article>${a.html}</article>`;
+  } else {
+    root.innerHTML =
+      `<p class="note">No article found on this page${d.no_article ? ` (${esc(d.no_article)})` : ""}.</p>`;
+  }
+
+  const c = d.comments;
+  if (c && c.count) {
+    const cc = c.completeness || {};
+    const items = c.items.map((it) => {
+      const indent = Math.min(it.depth || 0, 6) * 0.85;
+      const meta = [it.author, it.timestamp].filter(Boolean).map(esc).join(" · ");
+      // `html` is the UserContent profile's output; `text` is the fallback for an item whose
+      // content subtree could not be identified.
+      const body = it.html || `<p>${esc(it.text || "")}</p>`;
+      return `<li style="margin-left:${indent}rem">` +
+        `<div class="cmeta">${meta}${it.deleted ? " · deleted" : ""}</div>` +
+        `<div class="cbody">${body}</div></li>`;
+    }).join("");
+    root.insertAdjacentHTML("beforeend",
+      `<hr class="sep"><h2 class="section">${c.count} comment${c.count === 1 ? "" : "s"}` +
+      `${cc.truncated ? ` · showing ${cc.present} of ${cc.claimed_total ?? "more"}` : ""}</h2>` +
+      `<ol class="comments">${items}</ol>`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The host-facing API. Everything a Swift app needs is these three.
+// ---------------------------------------------------------------------------------------------
+window.legibility = {
+  /// Extract `html` and render it. Resolves with a small summary the host can log or act on.
+  async render(html) {
+    const root = $("root");
+    try {
+      await init();
+      const d = extract(html);
+      renderInto(root, d);
+      return {
+        ok: true,
+        title: (d.metadata && d.metadata.title && d.metadata.title.value) || null,
+        chars: (d.article && d.article.text ? d.article.text.length : 0),
+        comments: (d.comments && d.comments.count) || 0,
+        kind: (d.article && d.article.kind) || null,
+      };
+    } catch (e) {
+      root.innerHTML = `<p class="err">${esc(e.message || e)}</p>`;
+      return { ok: false, error: String(e.message || e) };
+    }
+  },
+
+  /// Extract without rendering, for a host that wants the data rather than the view.
+  async extract(html) {
+    await init();
+    return extract(html);
+  },
+
+  /// Which engine this page is carrying. A stale module looks exactly like a fix that did not work.
+  build: BUILD_STAMP,
+};
+
+$("status").textContent = "";
+</script>

@@ -21,7 +21,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WASM = ROOT / "target/wasm32-unknown-unknown/release/legibility_wasm.wasm"
-TEMPLATE = ROOT / "js/testbed/demo.html"
+
+# Which page to inline the module into. The demo is the default; `--template` selects another, so
+# the reader view is built by the same code rather than by a second script that would drift from it.
+TEMPLATES = {
+    "demo": ROOT / "js/testbed/demo.html",
+    "reader": ROOT / "js/reader/reader.html",
+}
+TEMPLATE = TEMPLATES["demo"]
 
 
 def build_wasm() -> Path:
@@ -49,6 +56,14 @@ def build_wasm() -> Path:
 
 
 def main() -> int:
+    global TEMPLATE
+    argv = sys.argv[1:]
+    if "--template" in argv:
+        at = argv.index("--template")
+        TEMPLATE = TEMPLATES[argv[at + 1]]
+        del argv[at : at + 2]
+        sys.argv = [sys.argv[0], *argv]
+
     # Resolved, so a relative argument works. `dist/index.html` is how the gh-pages bundle is built,
     # and the `relative_to(ROOT)` in the report below raises on a path that is not already absolute.
     out_path = (
