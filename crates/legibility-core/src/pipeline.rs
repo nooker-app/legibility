@@ -297,7 +297,7 @@ pub fn comment_section_nodes(
 fn named_furniture(arena: &Arena, node: crate::NodeId) -> bool {
     /// Whole `-`/`_`-separated tokens only: `header` must not match `headline`, and `ad` must never
     /// be a substring test at all.
-    const TOKENS: [&str; 14] = [
+    const TOKENS: [&str; 15] = [
         "header",
         "footer",
         "nav",
@@ -312,6 +312,10 @@ fn named_furniture(arena: &Arena, node: crate::NodeId) -> bool {
         "pager",
         "social",
         "share",
+        // A related-stories rail. Kept honest by the two conditions below rather than by the word:
+        // a curated link roundup that is genuinely the article holds an authored block, and a rail
+        // that is mostly prose does not clear the link-density bar.
+        "related",
     ];
     let named = [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
         .into_iter()

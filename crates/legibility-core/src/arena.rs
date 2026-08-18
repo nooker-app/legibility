@@ -379,7 +379,8 @@ impl Arena {
                 add_at(&mut self.element_count, i, 1);
                 // An <a> contributes its whole prose subtree to the link numerator. Done here,
                 // after children have folded up, so the subtree total is already final.
-                if self.tag.get(i).copied() == Some(a_tag) {
+                if self.tag.get(i).copied() == Some(a_tag) && !self.wraps_blocks_and_goes_nowhere(i)
+                {
                     let p = self.prose_len.get(i).copied().unwrap_or(0);
                     set_at(&mut self.link_prose_len, i, p);
                 }
@@ -491,5 +492,54 @@ fn add_at(col: &mut [u32], i: usize, v: u32) {
 fn set_at(col: &mut [u32], i: usize, v: u32) {
     if let Some(slot) = col.get_mut(i) {
         *slot = v;
+    }
+}
+
+impl Arena {
+    /// Whether this anchor wraps block content *and* navigates nowhere -- a wrapper, not a link.
+    ///
+    /// Link density exists to answer "is this a navigation block, or a body of text". A
+    /// `javascript:` anchor navigates nowhere -- it is a control wearing the wrong tag, which is
+    /// exactly what `<a href="javascript:void(0)">` wrapped around paragraphs is. Counting its
+    /// prose in the numerator takes the corpus page `js-link-replacement` to link density **1.0**,
+    /// which fails the viability floor and returns no article at all for a document that is
+    /// nothing but prose.
+    ///
+    /// Deliberately only `javascript:`. Anchors with no `href` at all are a much larger and less
+    /// clear-cut family -- `article-author-tag`, `folha` and `medicalnewstoday` all depend on those
+    /// still counting -- so widening this would move pages that are currently right.
+    fn wraps_blocks_and_goes_nowhere(&self, node: usize) -> bool {
+        let script_href = self.attr(NodeId(node as u32), AttrName::HREF).is_some_and(|h| {
+            let h = h.trim_start();
+            h.as_bytes().get(..11).is_some_and(|p| p.eq_ignore_ascii_case(b"javascript:"))
+        });
+        if !script_href {
+            return false;
+        }
+        // Both halves are needed, and the corpus holds one page for each. Without the scheme test,
+        // every anchor around a block stops counting. Without the block test, `geeknews`'s vote
+        // arrow and collapse toggle -- `<a href="javascript:vote(1)">&#9650;</a>` -- stop counting
+        // too, `is_control_furniture` no longer sees a pure-link block, and the arrows reappear
+        // inside the comment bodies. That regression was caught by the snapshot suite, not by the
+        // corpus, because the corpus metric cannot see comment HTML at all.
+        let end = (self.subtree_end.get(node).copied().unwrap_or(0) as usize).min(self.len());
+        // Anchors do not nest, so the total work here is bounded by the page's anchor content.
+        (node + 1..end).any(|d| {
+            matches!(self.kind.get(d).copied(), Some(NodeKind::Element))
+                && matches!(
+                    self.tag.get(d).copied(),
+                    Some(
+                        TagId::P
+                            | TagId::DIV
+                            | TagId::UL
+                            | TagId::OL
+                            | TagId::BLOCKQUOTE
+                            | TagId::SECTION
+                            | TagId::ARTICLE
+                            | TagId::PRE
+                            | TagId::TABLE
+                    )
+                )
+        })
     }
 }

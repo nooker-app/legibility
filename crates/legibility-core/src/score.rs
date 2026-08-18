@@ -58,6 +58,11 @@ pub struct Candidate {
     ///
     /// A region full of button labels and hidden promos is impure even if its prose is dense.
     pub purity: f32,
+    /// Prose over *visible* text (prose + control + alt), excluding hidden bytes.
+    ///
+    /// The floor in [`Self::is_viable`] tests this; [`Self::evidence`] keeps ranking on
+    /// [`Self::purity`]. See that method for why the two differ.
+    pub visible_purity: f32,
     /// `text_share × density × (1 − link_density) × purity`.
     pub evidence: f32,
 }
@@ -80,9 +85,23 @@ impl Candidate {
     /// `purity`'s denominator excludes [`crate::a11y::TextRole::Inert`] bytes, so inlined script
     /// and stylesheet source cannot fail a region here. That was a real bug: a `<main>` holding a
     /// 10 KB JS bundle alongside 450 bytes of post scored 0.04.
+    ///
+    /// # Why the floor and the ranking read different purities
+    ///
+    /// Hidden text is a reason to *distrust* a region and it is not a reason to refuse a page.
+    /// `hidden-nodes` in the corpus is one visible paragraph and two `display:none` ones: 1010
+    /// bytes against 1774, purity 0.363, below the floor — and since `<body>` was the only
+    /// candidate, the whole document came back as no article at all, for a page that is nothing
+    /// but three paragraphs.
+    ///
+    /// So the floor tests `visible_purity`, which leaves hidden bytes out of the denominator,
+    /// while `evidence` keeps ranking on the hidden-inclusive `purity`. A region padded with
+    /// hidden text still loses to a clean one; it just no longer takes the page down with it.
+    /// Control labels and `alt` text stay in both denominators — a toolbar is not an article on
+    /// any reading.
     #[must_use]
     pub fn is_viable(&self) -> bool {
-        self.purity >= Self::MIN_PURITY && self.link_density <= Self::MAX_LINK_DENSITY
+        self.visible_purity >= Self::MIN_PURITY && self.link_density <= Self::MAX_LINK_DENSITY
     }
 }
 
@@ -148,6 +167,7 @@ fn body_as_last_resort(arena: &Arena, masked_prose: &[u32]) -> Vec<Candidate> {
     let node = NodeId(body as u32);
     let link_density = arena.link_density(node).clamp(0.0, 1.0);
     let purity = guarded_div(prose as f32, all_text as f32);
+    let visible_purity = guarded_div(prose as f32, all_text.saturating_sub(hidden) as f32);
     // `text_share` is 1.0 by definition here: `<body>` holds all of the page's prose. That is
     // exactly why share alone can never be the ranking signal, and exactly why this function is
     // gated on there being nothing else to rank.
@@ -158,6 +178,7 @@ fn body_as_last_resort(arena: &Arena, masked_prose: &[u32]) -> Vec<Candidate> {
         density,
         link_density,
         purity,
+        visible_purity,
         evidence: density * (1.0 - link_density) * purity,
     }]
 }
@@ -201,9 +222,18 @@ pub fn collect_masked(arena: &Arena, masked_prose: &[u32]) -> (Vec<Candidate>, P
         let density = arena.text_density(node);
         let link_density = arena.link_density(node).clamp(0.0, 1.0);
         let purity = guarded_div(prose as f32, all_text as f32);
+        let visible_purity = guarded_div(prose as f32, all_text.saturating_sub(hidden) as f32);
         let evidence = text_share * density * (1.0 - link_density) * purity;
 
-        cands.push(Candidate { node, text_share, density, link_density, purity, evidence });
+        cands.push(Candidate {
+            node,
+            text_share,
+            density,
+            link_density,
+            purity,
+            visible_purity,
+            evidence,
+        });
     }
 
     let stats = page_stats(page_prose, &cands);
@@ -341,12 +371,20 @@ fn is_semantic_anchor(arena: &Arena, node: NodeId) -> bool {
     if arena.tag.get(node.idx()).copied().unwrap_or(TagId::UNKNOWN).is_positive_landmark() {
         return true;
     }
-    if arena.attr(node, crate::arena::AttrName::ITEMPROP).is_some_and(|p| {
-        // Space-separated token list, per the microdata spec, so `contains` would match
-        // `articleBodyish` and a plain equality test would miss `itemprop="name articleBody"`.
-        p.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("articlebody"))
-    }) {
-        return true;
+    // `property` as well as `itemprop`: RDFa spells the same claim with the other attribute, and
+    // the corpus page `bbc-1` is one of the sites that does. Space-separated token list either
+    // way, per the microdata spec, so `contains` would match `articleBodyish` and a plain equality
+    // test would miss `itemprop="name articleBody"`.
+    //
+    // `property` is the commoner attribute in the wild, but almost entirely as `og:*` on `<meta>`
+    // in `<head>`, which can never be a viable candidate. CURIE forms such as
+    // `property="schema:articleBody"` still do not match; that is conservative on purpose.
+    for name in [crate::arena::AttrName::ITEMPROP, crate::arena::AttrName::PROPERTY] {
+        if arena.attr(node, name).is_some_and(|p| {
+            p.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case("articlebody"))
+        }) {
+            return true;
+        }
     }
     match arena.attr(node, crate::arena::AttrName::ROLE) {
         Some(r) => {
@@ -664,6 +702,7 @@ mod tests {
             density: 100.0,
             link_density: 1.0,
             purity: 1.0,
+            visible_purity: 1.0,
             evidence: 90.0,
         };
         let prose = Candidate {
@@ -672,16 +711,25 @@ mod tests {
             density: 10.0,
             link_density: 0.0,
             purity: 1.0,
+            visible_purity: 1.0,
             evidence: 1.0,
         };
         assert!(!link_only.is_viable(), "a region of pure links is not an article");
         assert!(prose.is_viable());
 
         // ... and an impure region is impure regardless of how much text it holds.
-        let padded = Candidate { purity: 0.49, ..prose };
+        let padded = Candidate { visible_purity: 0.49, ..prose };
         assert!(!padded.is_viable());
-        let just_pure_enough = Candidate { purity: 0.5, ..prose };
+        let just_pure_enough = Candidate { visible_purity: 0.5, ..prose };
         assert!(just_pure_enough.is_viable(), "the floor is inclusive");
+
+        // Hidden text is the one impurity that does not disqualify: it drags `purity` down and so
+        // costs the region every ranking comparison, but a page whose only defect is a
+        // `display:none` paragraph still has an article in it. `hidden-nodes` in the corpus went
+        // from 0.000 to 1.000 on exactly this distinction.
+        let hidden_padded = Candidate { purity: 0.36, visible_purity: 1.0, ..prose };
+        assert!(hidden_padded.is_viable(), "hidden bytes must not refuse the page");
+        assert!(hidden_padded.purity < prose.purity, "but they still cost it the ranking");
     }
 
     #[test]
