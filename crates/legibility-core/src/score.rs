@@ -105,6 +105,62 @@ impl Candidate {
     }
 }
 
+/// How much of a page's prose may sit outside every candidate before `<body>` is reconsidered.
+///
+/// Swept over the corpus in 0.05 steps. Mean F1 is **flat at 0.9456 from 0.10 through 0.45** and
+/// falls to 0.9413 at 0.50 and above -- no page has an uncovered share anywhere inside that band,
+/// so the value is chosen from the middle of a plateau rather than fitted to a page. Above 0.45 a
+/// page whose containers genuinely hold most of its prose starts being replaced by `<body>`, which
+/// is the failure this gate exists to avoid.
+const MAX_UNCOVERED_PROSE: f32 = 0.35;
+
+/// Share of the page's prose that lies inside no candidate container at all.
+///
+/// The container list admits `<div>`, `<section>`, `<article>` and friends, and a page whose prose
+/// hangs off `<body>` in bare `<p>` and `<h2>` elements -- or off elements the list does not admit
+/// -- produces candidates that are real but incidental. `dev418` is three `<li>` holding 1.6% of
+/// the page each; `table-style-attributes` spreads its prose across nested tables. Ranking those
+/// against each other picks the argmax of a set that does not contain the answer.
+///
+/// Counted over *outermost* candidates only. Candidates nest -- a `<div>` wrapping a `<table>`
+/// wrapping a `<td>` is three of them -- so summing all of their prose would triple-count and
+/// report full coverage of a page that has none. Candidates arrive in document order, so anything
+/// starting before the current outermost candidate's `subtree_end` is inside it.
+fn uncovered_prose_share(arena: &Arena, cands: &[Candidate], masked_prose: &[u32]) -> f32 {
+    let Some(body) = (0..arena.len()).find(|&i| {
+        arena.kind.get(i).copied() == Some(NodeKind::Element)
+            && arena.tag.get(i).copied() == Some(TagId::BODY)
+    }) else {
+        return 0.0;
+    };
+    let page = arena
+        .prose_len
+        .get(body)
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(masked_prose.get(body).copied().unwrap_or(0));
+    if page == 0 {
+        return 0.0;
+    }
+    let mut covered = 0u32;
+    let mut reach = 0usize;
+    for c in cands {
+        let i = c.node.idx();
+        if i < reach {
+            continue;
+        }
+        reach = (arena.subtree_end.get(i).copied().unwrap_or(0) as usize).min(arena.len());
+        let prose = arena
+            .prose_len
+            .get(i)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(masked_prose.get(i).copied().unwrap_or(0));
+        covered = covered.saturating_add(prose);
+    }
+    1.0 - guarded_div(covered as f32, page as f32).clamp(0.0, 1.0)
+}
+
 /// Minimum candidates before page-relative statistics mean anything.
 ///
 /// Below this, a z-score is computed from a sample too small to have a shape — print views, AMP
@@ -463,9 +519,16 @@ pub fn select_article(arena: &Arena) -> Selection {
 pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
     let (cands, stats) = collect_masked(arena, masked_prose);
 
-    // Nothing containerish held prose. Before concluding there is no article, ask whether the
-    // article simply *is* `<body>` -- see [`body_as_last_resort`].
-    let cands = if cands.is_empty() { body_as_last_resort(arena, masked_prose) } else { cands };
+    // Nothing containerish held prose -- or what did hold prose does not add up to the page.
+    // Before concluding there is no article, ask whether the article simply *is* `<body>`; see
+    // [`body_as_last_resort`] and [`uncovered_prose_share`].
+    let cands = if cands.is_empty()
+        || uncovered_prose_share(arena, &cands, masked_prose) > MAX_UNCOVERED_PROSE
+    {
+        body_as_last_resort(arena, masked_prose)
+    } else {
+        cands
+    };
 
     if cands.is_empty() {
         // Zero candidates means no container held any prose at all -- an empty page, an error

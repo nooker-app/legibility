@@ -1311,3 +1311,40 @@ fn a_headline_that_is_the_only_title_source_is_not_also_left_in_the_body() {
         "an <h1> that disagrees with the declared <title> was deleted: {text}"
     );
 }
+
+/// A page whose prose hangs off `<body>` rather than off any container must still have an article.
+///
+/// `<body>` is admitted as a candidate only when nothing else is a real answer, because selecting
+/// it as a matter of course is the silent fallback defect 1 exists to remove. The gate used to be
+/// "no candidates at all", which missed the commoner shape: candidates that exist and are
+/// incidental. `dev418` is three `<li>` holding 1.6% of the page each and scored 0.038;
+/// `table-style-attributes` spreads its prose across nested tables and scored 0.434.
+#[test]
+fn prose_that_belongs_to_no_container_is_still_an_article() {
+    let paras = (0..6)
+        .map(|i| {
+            format!(
+                "<p>Paragraph {i} of a document whose author never wrapped the body in a \
+             container element, which is a thing real pages do.</p>"
+            )
+        })
+        .collect::<String>();
+
+    // Bare prose under <body>, plus a nav list that *is* containerish and holds almost nothing.
+    let html = format!(
+        "<html><head><title>A plain document</title></head><body>\
+         <ul><li><a href=/a>one</a></li><li><a href=/b>two</a></li></ul>\
+         {paras}</body></html>"
+    );
+    let (tag, text, _) = extract(&html);
+    assert_eq!(tag, "body", "the incidental <ul> was ranked against itself and won");
+    assert!(text.contains("Paragraph 5 of a document"), "the body was lost: {text}");
+
+    // The guard: when a container *does* hold the prose, it still wins and <body> does not.
+    let wrapped = format!(
+        "<html><head><title>A plain document</title></head><body><main>{paras}</main>\
+         <footer><p>Site furniture down here.</p></footer></body></html>"
+    );
+    let (tag, _, _) = extract(&wrapped);
+    assert_eq!(tag, "main", "<body> displaced a container that held the prose");
+}

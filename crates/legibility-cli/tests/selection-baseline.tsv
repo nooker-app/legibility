@@ -27,7 +27,7 @@ cnn	0.9733
 comment-inside-script-parsing	0.9922
 daringfireball-1	1.0000
 data-url-image	1.0000
-dev418	0.0377
+dev418	0.9712
 dropbox-blog	0.9903
 ebb-org	0.9702
 ehow-1	0.3640
@@ -102,7 +102,7 @@ social-buttons	0.9943
 spiceworks	0.9837
 style-tags-removal	1.0000
 svg-parsing	1.0000
-table-style-attributes	0.4337
+table-style-attributes	1.0000
 telegraph	0.9470
 theverge	0.9127
 title-and-h1-discrepancy	1.0000
