@@ -98,6 +98,10 @@ pub fn serialize_region_excluding<P: Profile>(
     let mut stack: Vec<Step<'_>> = vec![Step::Open(start)];
     // Depth of currently open emitted elements, for the render cap.
     let mut open_depth: u16 = 0;
+    // Names of the elements currently open in the *output*, innermost last. Not the arena's
+    // ancestry: an element whose tag was unwrapped is not here, so `h5 > form > h5` in the arena is
+    // `h5 > h5` on the page. Only used to answer "is my parent a heading".
+    let mut open_names: Vec<&str> = Vec::new();
 
     while let Some(step) = stack.pop() {
         if out.len() as u32 >= opts.max_output_bytes {
@@ -127,6 +131,7 @@ pub fn serialize_region_excluding<P: Profile>(
                 out.push_str(t);
                 out.push('>');
                 open_depth = open_depth.saturating_sub(1);
+                open_names.pop();
             }
             Step::Open(i) => {
                 if i >= end {
@@ -188,8 +193,31 @@ pub fn serialize_region_excluding<P: Profile>(
                         }
 
                         let kids = child_range(arena, i, end);
+                        // A heading inside a heading is a tree no HTML text can produce, so emitting
+                        // one guarantees the output will not survive a reparse: tree construction
+                        // pops an open `h1`-`h6` when another heading starts, and the two come back
+                        // as siblings. Our arena grows the shape anyway, because the adoption agency
+                        // algorithm reparents around a formatting element --
+                        // `<h5>a<a>b<h5>c<a>d</a></h5></a></h5>` parses to `h5 > h5`.
+                        //
+                        // Serializing that faithfully cost a round every time and broke the fixpoint
+                        // contract: once and the nesting is there, twice and the parser has split
+                        // it, three times to settle. It is what failed the nightly
+                        // `sanitize_roundtrip_article` and `sanitize_roundtrip_ugc` runs every night
+                        // since 2026-08-07 -- two unrelated-looking inputs whose only shared feature
+                        // was `h3 > h3` and `h5 > h5`.
+                        //
+                        // So the inner heading is unwrapped. Its text survives, which is the part
+                        // that matters; what goes is a heading boundary no browser would have
+                        // rendered there either.
+                        // Directly inside another heading -- `h5 > a > h5` is fine and stable,
+                        // because a heading start tag only pops an open heading when that heading
+                        // is the *current* node.
+                        let nested_heading =
+                            is_heading(name) && open_names.last().copied().is_some_and(is_heading);
                         let emit = !name.is_empty()
                             && legibility_sanitize::is_allowed_element(name)
+                            && !nested_heading
                             && open_depth < opts.max_render_depth;
 
                         if !emit {
@@ -227,6 +255,7 @@ pub fn serialize_region_excluding<P: Profile>(
                             continue;
                         }
                         open_depth = open_depth.saturating_add(1);
+                        open_names.push(name);
                         stack.push(Step::Close(name));
                         for k in kids.into_iter().rev() {
                             stack.push(Step::Open(k));
@@ -499,6 +528,14 @@ fn write_attrs<P: Profile>(
             out.push('"');
         }
     }
+}
+
+/// `h1` through `h6`.
+///
+/// One purpose: refusing to emit a heading inside a heading, which is unwritable in HTML and so
+/// cannot round-trip. See the note at the `emit` decision in `serialize_region_excluding`.
+fn is_heading(name: &str) -> bool {
+    matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
 }
 
 #[cfg(test)]
