@@ -115,9 +115,30 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 
-cap 120 "$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
-  --virtual-time-budget=25000 --dump-dom "http://127.0.0.1:$PORT/drive.html" \
-  >"$TMP/dom.html" 2>"$TMP/console.log"
+# Retried, because a cold Chrome loses this race and says nothing about the engine.
+#
+# `--dump-dom` prints whatever the DOM holds when the virtual clock runs out, with no way to say
+# "the page never finished" -- so an unfinished render arrives as a DOM with no `RESULT` title and
+# reads exactly like a broken engine. That is how this failed in CI while passing in 4.5 seconds
+# locally: first launch on a fresh runner creates a profile, probes a bus that is not there and
+# compiles 669 KB of WebAssembly, and 25 virtual seconds ran out first. The `file://` probe
+# immediately after it passed, on the same binary, because Chrome was warm by then.
+#
+# So: a larger virtual budget and up to three attempts on the marker. A page that genuinely renders
+# nothing still fails, three times over and no slower than it used to be, since a success breaks out
+# on the first pass.
+#
+# Not `--user-data-dir`: giving Chrome a private profile stops it exiting after `--dump-dom`, and
+# both launches then sit until the 120-second cap -- a four-minute verification that passes, which
+# is its own kind of broken.
+for attempt in 1 2 3; do
+  cap 120 "$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
+    --no-first-run --no-default-browser-check --disable-dev-shm-usage \
+    --virtual-time-budget=40000 --dump-dom "http://127.0.0.1:$PORT/drive.html" \
+    >"$TMP/dom.html" 2>"$TMP/console.log"
+  grep -q "RESULT " "$TMP/dom.html" && break
+  [ "$attempt" = 3 ] || say NOTE "the page had not finished rendering; retrying ($attempt of 3)"
+done
 
 # `file://` only has to get as far as exposing the API; the CSP is what could stop it.
 cat > "$TMP/init.html" <<'INIT'
@@ -127,7 +148,8 @@ cat > "$TMP/init.html" <<'INIT'
 INIT
 cat "$FILE" "$TMP/init.html" > "$TMP/fileprobe.html"
 cap 120 "$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
-  --virtual-time-budget=15000 --dump-dom "file://$TMP/fileprobe.html" \
+  --no-first-run --no-default-browser-check --disable-dev-shm-usage \
+  --virtual-time-budget=25000 --dump-dom "file://$TMP/fileprobe.html" \
   >"$TMP/filedom.html" 2>/dev/null
 if grep -q "INIT ok" "$TMP/filedom.html"; then
   say PASS "initializes from file:// (the transport a WKWebView loads)"
