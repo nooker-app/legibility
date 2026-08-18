@@ -105,10 +105,15 @@ What is proven, and by which gate on every push:
   both sanitizer profiles fuzzed independently for reparse-fixpoint and mXSS.
 - **A per-page quality ratchet.** No page may fall below what it last scored.
 
-What is **not** proven: *"better than Readability.js."* That claim needs the `legibility-legacy`
-oracle and the `LOSSES` parity anchor, and neither exists yet — the comparison above is against
-`expected.html`, which the plan classes as advisory. Also absent: site adapters, the community and
-a11y corpora, and a published package for either npm or crates.io.
+What is **not** proven: *"better than Readability.js."* The 0.9144 above is measured against
+`expected.html`, and `expected.html` is Readability's own output — reproduced byte-for-byte on
+129 of the 130 pages by `tools/rjs-baseline`. So that number is **91.4% agreement with
+Readability**, R.js scores 1.000 on its own corpus by construction, and the 13 pages under 0.80 are
+disagreements this corpus cannot adjudicate. Where ground truth is ours rather than either
+engine's — the thirteen shape fixtures — the count is three differences in our favour and one
+against, since fixed. [`docs/parity-gate.md`](docs/parity-gate.md) has the measurement and what
+would make the stronger claim provable. Also absent: site adapters, the community and a11y corpora,
+and a published package for either npm or crates.io.
 
 Known rough edges are named rather than hidden: `docs/limits.md` for what v1 deliberately does not
 do, and `crates/legibility-cli/tests/anchor_band.rs` for the pages this work knowingly made worse and

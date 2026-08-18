@@ -157,11 +157,15 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         // against the winning candidate is circular and matches every time -- which is how the
         // corpus page named `title-and-h1-discrepancy` lost the `<h1>` that Readability keeps.
         // Readability compares against `document.title` for the same reason.
-        if let Some(declared) = declared_title(&metadata) {
-            if let Some(h) = duplicate_heading(arena, region, declared) {
-                article_exclusions.push(h);
-                article_exclusions.extend(headline_furniture(arena, region, h));
-            }
+        let headline = match declared_title(&metadata) {
+            Some(declared) => duplicate_heading(arena, region, declared),
+            // Nothing declared a title, so the heading *is* the title -- see `headline_that_is_
+            // the_title` for why that is a different situation from a circular comparison.
+            None => headline_that_is_the_title(arena, region, &metadata),
+        };
+        if let Some(h) = headline {
+            article_exclusions.push(h);
+            article_exclusions.extend(headline_furniture(arena, region, h));
         }
     }
     // The dateline in front of the headline, on discussion pages only. `shape` is `None` for
@@ -745,6 +749,54 @@ fn tokens(s: &str) -> alloc::vec::Vec<alloc::string::String> {
         out.push(cur);
     }
     out
+}
+
+/// The heading the title was harvested *from*, when the document declared no title of its own.
+///
+/// # Why this is not the circular comparison [`declared_title`] refuses to make
+///
+/// An `<h1>` outranks `<title>` for the metadata field, so on a page that has both, testing the
+/// heading against the winning candidate matches whatever the heading says and deletes it. That is
+/// how the corpus page `title-and-h1-discrepancy` lost an `<h1>` Readability keeps, and it is why
+/// [`declared_title`] skips `H1` candidates.
+///
+/// A page with *no* `<title>`, `og:title` or JSON-LD name is a different situation, and Reddit's
+/// rendered post is one: the `<h1>` is the only thing that ever said what the page is called. Then
+/// `metadata.title` and the top of `article.html` are the same sentence, and a reader view prints
+/// the headline twice. Readability drops it too, by way of `_headerDuplicatesTitle` reading its
+/// own `_getArticleTitle` fallback.
+///
+/// So no text is compared here at all. The candidate carries the `doc_buf` span it was built from,
+/// and that span belongs to exactly one text node; the answer is that node's parent, if the parent
+/// is a heading inside the region. Identity, not resemblance -- there is no threshold to be wrong
+/// about, and a heading that merely reads like the title cannot be caught by it.
+fn headline_that_is_the_title(
+    arena: &Arena,
+    region: crate::NodeId,
+    m: &Metadata,
+) -> Option<crate::NodeId> {
+    let cand = m.title.as_ref().filter(|c| c.source == meta::Source::H1)?;
+    let end = (arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize).min(arena.len());
+    for i in (region.idx() + 1)..end {
+        if arena.kind.get(i).copied() != Some(crate::NodeKind::Text) {
+            continue;
+        }
+        if arena.text_start.get(i).copied() != Some(cand.span_start) {
+            continue;
+        }
+        let parent = arena.parent.get(i).copied()?;
+        // Inside the region, and a heading. A text node whose span starts here but hangs off a
+        // `<p>` is a coincidence of the buffer, not the headline.
+        if parent.idx() <= region.idx() || parent.idx() >= end {
+            return None;
+        }
+        return matches!(
+            arena.tag.get(parent.idx()).copied(),
+            Some(crate::TagId::H1 | crate::TagId::H2)
+        )
+        .then_some(parent);
+    }
+    None
 }
 
 /// Prose text of a subtree, whitespace-collapsed.

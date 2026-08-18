@@ -1273,3 +1273,41 @@ fn a_per_item_class_does_not_split_one_template_into_thirteen() {
     assert!(text.contains("Certification schemes"), "the article was lost: {text}");
     assert!(!text.contains("volunteering to help"), "a comment leaked into the body: {text}");
 }
+
+/// A page whose only title is its `<h1>` must not then print that `<h1>` inside the body.
+///
+/// Found by running Readability.js against the self-authored fixtures — the one comparison in this
+/// repo that is not circular, since on mozilla's corpus `expected.html` *is* R.js's output. R.js
+/// dropped the heading here and we kept it, so a reader view rendered the headline twice: once
+/// from `metadata.title` and again at the top of `article.html`.
+///
+/// The pair matters more than either case. With a `<title>` present the `<h1>` stays, because the
+/// two disagreeing is a fact about the page rather than a duplicate; with no `<title>` at all the
+/// `<h1>` is where the title came from, and keeping it is the duplicate.
+#[test]
+fn a_headline_that_is_the_only_title_source_is_not_also_left_in_the_body() {
+    let body = "<div><p>A paragraph with enough words in it to be selected as the body of \
+        this page, rather than being thrown out as furniture by the purity floor.</p></div>";
+
+    let untitled = format!(
+        "<html><body><main><h1>Why my feed reader will not add this site</h1>\
+        {body}</main></body></html>"
+    );
+    let (_, text, _) = extract(&untitled);
+    assert!(
+        !text.contains("Why my feed reader will not add this site"),
+        "the <h1> the title was harvested from is still in the body: {text}"
+    );
+    assert!(text.contains("A paragraph with enough words"), "the body itself was lost: {text}");
+
+    // The guard this fix had to stay inside: `title-and-h1-discrepancy` in mozilla's corpus.
+    let titled = format!(
+        "<html><head><title>Something else entirely</title></head><body><main>\
+        <h1>Why my feed reader will not add this site</h1>{body}</main></body></html>"
+    );
+    let (_, text, _) = extract(&titled);
+    assert!(
+        text.contains("Why my feed reader will not add this site"),
+        "an <h1> that disagrees with the declared <title> was deleted: {text}"
+    );
+}

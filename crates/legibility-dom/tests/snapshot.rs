@@ -600,3 +600,31 @@ fn bless() {
         println!("{} {name}", if changed { "wrote  " } else { "unchanged" });
     }
 }
+
+/// Write each fixture's source HTML where `tools/rjs-baseline` can read it.
+///
+/// The fixtures are the only pages in this repo whose correct extraction is stated by *us* rather
+/// than by an engine, which makes them the only place a comparison against Readability.js means
+/// anything. On mozilla's 130 pages `expected.html` is R.js's own output, so R.js scores 1.000
+/// there by construction and "we agree with R.js 91% of the time" is the whole of what that
+/// corpus can say.
+///
+/// Ignored, and writes outside the repo: plan D9 keeps HTML out of the history, and while these
+/// bytes are self-authored, the generated copies are derived files with a source of truth ten
+/// lines up.
+///
+/// ```text
+/// cargo test -p legibility-dom --test snapshot -- --ignored dump_fixtures
+/// node tools/rjs-baseline/run.js --out rjs.json /tmp/legibility-fixtures/*.html
+/// ```
+#[test]
+#[ignore = "writes fixture HTML to /tmp for the Readability.js comparison"]
+fn dump_fixtures() {
+    let dir = std::env::temp_dir().join("legibility-fixtures");
+    std::fs::create_dir_all(&dir).expect("creating the fixture directory");
+    for (name, html) in cases() {
+        let path = dir.join(format!("{name}.html"));
+        std::fs::write(&path, &html).expect("writing a fixture");
+        println!("wrote {}", path.display());
+    }
+}
