@@ -78,7 +78,14 @@ jobs:
       - name: Reader view
         run: |
           rustup target add wasm32-unknown-unknown
-          sudo apt-get update && sudo apt-get install -y binaryen
+          # Best-effort and time-boxed. `wasm-opt` only makes the module ~120 KB smaller; the
+          # bundle behaves identically without it and the build says so rather than silently
+          # shipping a bigger artifact. Unbounded, this line sat eighteen minutes on
+          # `archive.ubuntu.com` and took the whole job's twenty-minute budget with it -- an Ubuntu
+          # mirror should not be able to fail a gate that tests our own engine.
+          timeout 180 sudo apt-get update \
+            && timeout 180 sudo apt-get install -y binaryen \
+            || echo "::warning::binaryen unavailable; the reader bundle will be larger"
           python3 scripts/build-offline-demo.py --template reader js/reader/reader-bundled.html
           scripts/verify-reader.sh
 
