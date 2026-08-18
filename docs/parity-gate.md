@@ -76,6 +76,37 @@ only thing that ever declared a title — `metadata.title.source` was `h1` — a
 `a_headline_that_is_the_only_title_source_is_not_also_left_in_the_body` guards both directions: the
 heading goes when it is the sole title source, and stays when a `<title>` disagrees with it.
 
+## What the disagreements turned out to be
+
+Thirteen agents diagnosed the thirteen pages then below 0.80, one page each, with `lgb explain` and
+control experiments. That is the `INFRA` / `PARSER` / `ARITH` decomposition the `legibility-legacy`
+port was scoped to produce, obtained by inspection:
+
+| cause | pages |
+|---|---:|
+| SCORING — both trees fine, we picked a different region | 10 |
+| EXCLUSION — same region, different pruning | 1 |
+| CORRECT_DIFFERENCE — we differ and ours is better | 2 |
+| **INFRA** | **0** |
+| **PARSER** | **0** |
+
+The empty rows are the result, and they rest on *positive* controls rather than absence of
+evidence: on ten of the thirteen pages the diagnosis names a node in our own arena whose serialized
+text scores 0.92–1.00 against `expected.html`. The arena holds the region Readability chose and the
+serializer emits it faithfully. What was wrong is the arithmetic that picks which node.
+
+Five fixes followed, each measured on its own: `property="articleBody"` alongside `itemprop`, a
+`related` furniture token, `javascript:` anchors around block content no longer counting as links,
+a `visible_purity` that keeps hidden bytes out of the viability floor while leaving them in the
+ranking, and a `<body>` last-resort gate that fires on prose *coverage* rather than only on an
+empty candidate pool. **Corpus mean 0.9144 → 0.9456; pages below 0.80: 13 → 7.**
+
+Two of the thirteen are permanent and should not be recovered. `nytimes-5` (0.5009) is a near-strict
+superset of `expected.html` at recall 0.993, because Readability's `cleanConditionally` deleted the
+headlines from 16 of the 22 story cards it kept. `hukumusume` (0.5410) omits a nav rail that
+Readability's sibling pass swept in. Together they cost 0.0074 of corpus mean, and both proposed
+"fixes" are changes the diagnoses themselves argue against.
+
 ## What would make the claim provable
 
 Not the R.js baseline, which is now built and says 1.000. **Hand-labelled ground truth** — plan §2.4's
@@ -88,17 +119,22 @@ neither produced. Until those exist, the defensible claims are:
 
 Anything stronger is not currently supported by a measurement.
 
-## What the `legibility-legacy` port is still for
+## Is the `legibility-legacy` port still warranted?
 
-Unchanged by the above, and worth stating because the baseline landing does not replace it. The port
-runs Readability's algorithm **on our arena**, which splits a disagreement into causes the baseline
-cannot separate:
+**Not as a diagnostic.** Its purpose was the decomposition above, applied to the pages under 0.80,
+and that is now done — by a stronger argument than the port makes. The port's INFRA test is negative
+("the port disagrees too, so something underneath is broken"); the controls are positive ("node N in
+our arena serializes to `expected.html` at F1 0.92–1.00"). Building 3–4k LOC to relabel those pages
+`SCORING` would buy an answer already in hand.
 
-- **`INFRA`** — the port disagrees with `expected.html` too, so our arena or serializer is
-  unfaithful and the bug is ours to fix.
-- **`PARSER`** — html5ever and JSDOMParser built different trees.
-- **`ARITH`** — the two agree structurally and a float near-tie picked a different top candidate.
+What it would still be good for, stated exactly, because it is not nothing:
 
-Applied to the 13 pages under 0.80, that answers "is our scoring deliberately different, or is
-something underneath it broken?" — which is the actual open question, and the one number no
-comparison of two finished outputs can produce.
+1. **An oracle for the one mechanism we lack.** The remaining pages need region *growth* —
+   Readability's `parentOfTopCandidate` climb and its sibling-append pass — and the risk is that
+   widening a region is how index pages and comment threads become article bodies (`groups.rs`
+   records `mozilla-2` going 0.991 → 0.000 that way). A port of `grabArticle`'s sibling pass and
+   `_cleanConditionally` **only** would print, for all 130 pages, which node the climb reaches and
+   what it prunes — turning "sweep an unwritten rule" into a measurement against a reference. That
+   is a few hundred lines scoped to two functions, not a port of `parse()`.
+2. **Amortising the next thirteen diagnoses.** These cost hours of hand work each and do not
+   generalise. That is a standing-infrastructure argument, not a this-week one.
