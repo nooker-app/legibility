@@ -74,6 +74,56 @@ fn a_heading_below_some_other_element_keeps_its_tag() {
     assert!(out.contains("<h5>c</h5>"), "the inner heading lost its tag: {out}");
 }
 
+/// Every input a nightly fuzz run has ever rejected, replayed.
+///
+/// The bytes are the fuzzer's own minimized cases, not hand-written markup, and that is the point:
+/// each of these took real fuzzing to reach and none of them survives being simplified into
+/// something readable. `<ul><a>x<a>y</a></a></ul>` looks like `ugc-anchor-in-anchor` and proves
+/// nothing, because the first parse splits it and the arena never holds the shape at all.
+///
+/// Not valid UTF-8 and not meant to be — they arrive as bytes, which is how the module is called.
+///
+/// Counted from the *first* sanitization, exactly as the fuzz target does. Round zero is the raw
+/// input, which is arbitrary tag soup and is allowed to move once: whitespace before `<html>` is
+/// dropped during tree construction, so a document beginning with a tab emits it once and never
+/// again. The contract is that sanitized output is stable, not that unparsed bytes are.
+#[test]
+fn every_minimized_fuzz_case_settles_within_two_rounds() {
+    for (name, bytes) in [
+        (
+            "ugc-heading-in-heading",
+            &include_bytes!("../../../tests/regressions/ugc-heading-in-heading.bin")[..],
+        ),
+        (
+            "ugc-anchor-in-anchor",
+            &include_bytes!("../../../tests/regressions/ugc-anchor-in-anchor.bin")[..],
+        ),
+    ] {
+        let first = once::<UserContent>(&String::from_utf8_lossy(bytes));
+        let (rounds, out) = settle::<UserContent>(&first);
+        assert!(rounds <= 2, "{name} took {rounds} rounds to settle:\n{out}");
+    }
+
+    let bytes = &include_bytes!("../../../tests/regressions/article-heading-in-heading.bin")[..];
+    let first = once::<Article>(&String::from_utf8_lossy(bytes));
+    let (rounds, out) = settle::<Article>(&first);
+    assert!(rounds <= 2, "article-heading-in-heading took {rounds} rounds to settle:\n{out}");
+}
+
+/// Two links in two table cells are not nested, whatever the ancestor walk says.
+///
+/// A marker goes on the list of active formatting elements when the parser enters `td`, `th` or
+/// `caption`, so formatting does not reach across one. Without that bound the ancestor search would
+/// strip the second link on any table of links.
+#[test]
+fn links_in_separate_table_cells_both_survive() {
+    let html = "<table><tr><td><a href=\"/one\">one</a></td>\
+        <td><a href=\"/two\">two</a></td></tr></table>";
+    let (rounds, out) = settle::<UserContent>(html);
+    assert!(rounds <= 2, "took {rounds} rounds to settle: {out}");
+    assert_eq!(out.matches("<a ").count(), 2, "a link was unwrapped: {out}");
+}
+
 /// A `<pre>` eats a newline immediately after its start tag on every parse, so emitting the content
 /// verbatim loses one per round and it never settles. Regression-guarded here because it is the
 /// other member of this family and was found the same way.

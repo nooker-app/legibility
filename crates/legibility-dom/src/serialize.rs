@@ -215,9 +215,22 @@ pub fn serialize_region_excluding<P: Profile>(
                         // is the *current* node.
                         let nested_heading =
                             is_heading(name) && open_names.last().copied().is_some_and(is_heading);
+                        // An `<a>` inside an `<a>` is the same problem with a wider reach. An `<a>`
+                        // start tag runs the adoption agency against any `<a>` still on the list of
+                        // active formatting elements, so what matters is not the parent but every
+                        // open ancestor back to a marker. This is what the 900-second nightly found
+                        // after the heading fix landed: round two emitted `<a>x<a>y</a></a>` and
+                        // round three split it, one round too late.
+                        let nested_anchor = name == "a"
+                            && open_names
+                                .iter()
+                                .rev()
+                                .take_while(|t| !inserts_formatting_marker(t))
+                                .any(|t| *t == "a");
                         let emit = !name.is_empty()
                             && legibility_sanitize::is_allowed_element(name)
                             && !nested_heading
+                            && !nested_anchor
                             && open_depth < opts.max_render_depth;
 
                         if !emit {
@@ -528,6 +541,14 @@ fn write_attrs<P: Profile>(
             out.push('"');
         }
     }
+}
+
+/// Elements that put a marker on the list of active formatting elements.
+///
+/// Formatting elements do not reach across one of these, so an `<a>` inside a `<td>` is invisible
+/// to an `<a>` outside it. Bounds the ancestor search in the `nested_anchor` test.
+fn inserts_formatting_marker(name: &str) -> bool {
+    matches!(name, "td" | "th" | "caption" | "template" | "object" | "marquee" | "applet")
 }
 
 /// `h1` through `h6`.
