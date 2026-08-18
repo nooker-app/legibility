@@ -93,6 +93,19 @@ PY
 # `loadFileURL` — is asserted separately and narrowly: that the page initializes there at all, which
 # is the only part that can differ by origin. The CSP refusal that broke this page originally would
 # still be caught, because it stops initialization.
+# Headless Chrome can wedge -- waiting on a socket, a GPU probe, a profile lock -- and
+# `--virtual-time-budget` bounds the page's clock, not the process's. Without a wall-clock bound a
+# wedged browser hangs the whole run: one CI job sat on this step for thirty-two minutes against a
+# 4.5-second local time before anyone looked. `timeout` is GNU coreutils and is not on every macOS,
+# so fall back to running unguarded rather than failing to run at all.
+if command -v timeout >/dev/null 2>&1; then
+  cap() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+  cap() { gtimeout "$@"; }
+else
+  cap() { shift; "$@"; }
+fi
+
 PORT="${2:-8931}"
 python3 -m http.server "$PORT" --directory "$TMP" >/dev/null 2>&1 &
 server=$!
@@ -102,7 +115,7 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 
-"$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
+cap 120 "$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
   --virtual-time-budget=25000 --dump-dom "http://127.0.0.1:$PORT/drive.html" \
   >"$TMP/dom.html" 2>"$TMP/console.log"
 
@@ -113,7 +126,7 @@ cat > "$TMP/init.html" <<'INIT'
 });</script>
 INIT
 cat "$FILE" "$TMP/init.html" > "$TMP/fileprobe.html"
-"$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
+cap 120 "$CHROME" --headless --disable-gpu --no-sandbox --allow-file-access-from-files \
   --virtual-time-budget=15000 --dump-dom "file://$TMP/fileprobe.html" \
   >"$TMP/filedom.html" 2>/dev/null
 if grep -q "INIT ok" "$TMP/filedom.html"; then

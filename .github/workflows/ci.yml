@@ -31,6 +31,11 @@ env:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # The default is six hours. Every green run of this job has finished in under seven minutes, so
+    # anything past twenty is a hang, and the useful outcome of a hang is a failure now rather than
+    # a held runner and a queue behind it. A `Reader view` step once sat at thirty-two minutes with
+    # no bound on it at all; the same verification takes 4.5 seconds locally.
+    timeout-minutes: 20
     steps:
       # `submodules: recursive` is load-bearing: the corpus is a submodule, and without it the
       # ratchet silently measures zero pages and the S3 leg compares one fixture. Both would pass.
@@ -85,6 +90,8 @@ jobs:
   # late: a target that no longer compiles against the engine, and one that fails on the first input.
   fuzz-smoke:
     runs-on: ubuntu-latest
+    # Five targets at 60s each, plus build. Twenty is generous and still bounded.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -119,6 +126,7 @@ jobs:
   # reported as an iOS problem, and so the expensive runner is not in the critical path.
   macos:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
