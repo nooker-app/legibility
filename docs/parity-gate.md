@@ -138,3 +138,43 @@ What it would still be good for, stated exactly, because it is not nothing:
    is a few hundred lines scoped to two functions, not a port of `parse()`.
 2. **Amortising the next thirteen diagnoses.** These cost hours of hand work each and do not
    generalise. That is a standing-infrastructure argument, not a this-week one.
+
+## Bugs 3 and 1: measured, not fixed
+
+Two of the remaining sub-0.80 pages resisted five measured attempts on 2026-08-19. Recording what
+was tried, because the next person to look will otherwise try the same things.
+
+**`yahoo-3` (0.3798) — a related-stories rail.** Twenty-odd `<li class="js-stream-content">` items,
+each a headline link and a ~300-byte summary of another story. The triage classed this `EXCLUSION`
+("same region, different pruning"); it is not. The rail is **58% of the region the scorer picks**,
+and the correct region — `div.body yom-art-content`, purity 1.000, density 85 — is a candidate at
+rank nine. It is a selection problem.
+
+| attempt | result |
+|---|---|
+| prune listing groups from the region's output | **−0.004 mean**: Wikipedia's reference and see-also lists are `<li>` runs leading with links and part of the article. `wikipedia-2` 0.950 → 0.772, `wikipedia-4` 0.980 → 0.828, `blogger` 0.999 → 0.898. `yahoo-3` unchanged. |
+| ... and require the container to be *named* a rail (`stream`, `related`, …) | fires on **nothing**. Yahoo's container is `class="Bleed Mt-neg-10 Mb-0 ResetChildren Wow-b"` — atomic CSS names no intent. |
+| mask listing prose *before* scoring, as comments already are | mask is correct (8397 bytes, the rail included) and selection **does not move**. Removing the rail leaves the region still holding video-player chrome and a comment form, ~2750 bytes more than the real body. |
+
+What it actually needs: the video player's labels (`Closed Caption`, and a menu of quality and font
+settings) are `TextRole::Prose` today and are controls. Plan §1.10.3 already specifies the rule —
+text under an interactive ARIA role is `Control` — and the roles are implemented; these particular
+elements simply do not carry them. That is a11y work (plan M5's tail), not scoring work.
+
+**`bug-1255978` (0.0000) — a fifty-slide gallery.** Its caption list is 65% of the page's prose, over
+the dominance share, so the page is refused as an index. Three distinct blockers, each found by
+measurement:
+
+1. The argmax is the gallery itself, so `region_from_semantic_anchor` is unset and the containment
+   rule added for `news.hada.io/topic?id=32685` cannot disarm the veto.
+2. The captions carry no links, so a rail rule keyed on items pointing elsewhere excludes them.
+3. `mask_by_identity` keys on `(tag, class_bits)` and requires a non-empty class. The gallery's
+   `<li data-gallery-legend="N">` have no class at all, so they can never be masked by identity.
+
+Blocker 3 is the tractable one and is not specific to this page: a repeated group whose members
+carry no class is invisible to masking altogether.
+
+**Neither page was left in a worse state, and nothing was shipped for either.** Every attempt above
+was reverted; the corpus is at 0.9498 with six pages under 0.80. The reason to write this down is
+that all five attempts were plausible, three of them were the triage's own recommendations, and each
+cost a measurement to reject.
