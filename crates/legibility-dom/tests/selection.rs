@@ -1348,3 +1348,63 @@ fn prose_that_belongs_to_no_container_is_still_an_article() {
     let (tag, _, _) = extract(&wrapped);
     assert_eq!(tag, "main", "<body> displaced a container that held the prose");
 }
+
+/// An article whose body *is* a bullet list must not be refused as an index page.
+///
+/// Reported against `news.hada.io/topic?id=32685`, where the whole page came back
+/// `no_article: "IndexPage"`. The body is a `<section itemprop="articleBody">` holding fourteen
+/// `<li>`, and because roughly a third of their text sits inside links the group scored
+/// `mean_link_density` 0.36 — over the 0.3 bar that makes a repeated group a listing. At 61% of the
+/// page's prose it also passed the 0.55 dominance share, so the listing veto fired and withheld the
+/// article. Nothing was wrong with the region: the semantic anchor had already selected it.
+///
+/// A summary written as bullet points is the house style of a whole class of site, so the veto has
+/// to be able to tell "this page is an index" from "this article is a list".
+#[test]
+fn an_article_whose_body_is_a_bullet_list_is_not_an_index_page() {
+    let bullets: String = (0..14)
+        .map(|i| {
+            format!(
+                "<li><strong>Point {i}</strong>: a sentence of summary long enough to matter, \
+                 citing <a href=\"https://example.test/{i}\">a source with a fairly long link \
+                 label</a> as most of its text.</li>"
+            )
+        })
+        .collect();
+    let html = format!(
+        "<html><head><title>A summary in bullets | Example</title></head><body><main>\
+         <article><h1>A summary in bullets</h1>\
+         <section itemprop=\"articleBody\"><ul>{bullets}</ul></section>\
+         </article></main></body></html>"
+    );
+
+    let (tag, text, _) = extract(&html);
+    assert_ne!(tag, "none", "the page was refused: an article whose body is a list");
+    assert!(text.contains("Point 13"), "the last bullet is missing: {text}");
+    assert!(text.contains("Point 0"), "the first bullet is missing: {text}");
+}
+
+/// The other half: a genuine index page must still be refused.
+///
+/// The containment test needs both halves — an anchor *and* the group inside it. An anchor alone
+/// would disarm the veto on any page with a `<main>`, which is most of them. Here the item list is
+/// the page rather than an article's body, so nothing declares it to be article content and the
+/// veto still fires.
+#[test]
+fn a_front_page_of_links_is_still_an_index_page() {
+    let items: String = (0..14)
+        .map(|i| {
+            format!(
+                "<li><h2><a href=\"https://example.test/story-{i}\">Story number {i} with a \
+                 headline long enough to carry the page's text</a></h2></li>"
+            )
+        })
+        .collect();
+    let html = format!(
+        "<html><head><title>Front page | Example</title></head><body><main>\
+         <ul class=\"stories\">{items}</ul></main></body></html>"
+    );
+
+    let (tag, _, _) = extract(&html);
+    assert_eq!(tag, "none", "a front page of story links was served as an article");
+}

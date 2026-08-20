@@ -118,7 +118,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
     // A listing is a page whose prose is dominated by a repeated group that is *not* a discussion.
     // Checked after selection so that a normal article containing a small related-links list is not
     // mistaken for one.
-    let listing = dominant_listing(&groups, page_prose, stated_total);
+    let listing = dominant_listing(arena, &selection, &groups, page_prose, stated_total);
     if listing && comments.is_empty() {
         selection =
             Selection { article: None, no_article: Some(NoArticle::IndexPage), ..selection };
@@ -480,12 +480,48 @@ fn furniture_landmarks(arena: &Arena, region: crate::NodeId) -> alloc::vec::Vec<
 ///
 /// The threshold is a *share*, not a count: a front page is mostly its list of items, while an
 /// article that happens to end with a "related posts" block is not.
-fn dominant_listing(groups: &[Group], page_prose: u32, stated_total: Option<u32>) -> bool {
+fn dominant_listing(
+    arena: &Arena,
+    selection: &crate::score::Selection,
+    groups: &[Group],
+    page_prose: u32,
+    stated_total: Option<u32>,
+) -> bool {
     const DOMINANT_SHARE: f32 = 0.55;
     groups
         .iter()
         .filter(|g| g.is_listing() && !g.is_comment_thread(stated_total))
+        .filter(|g| !inside_a_declared_article(arena, selection, g.parent))
         .any(|g| guarded_div(g.prose_len as f32, page_prose as f32) >= DOMINANT_SHARE)
+}
+
+/// Whether a repeated group sits *inside* a region the page itself declared to be the article.
+///
+/// The listing veto answers "is this whole page an index", and its only outcome is to return
+/// nothing at all. That is right for a front page and wrong for an article whose body happens to be
+/// a list -- and a summary written as bullet points is the house style of an entire class of site.
+///
+/// `news.hada.io/topic?id=32685` is one: the body is a `<section itemprop="articleBody">` holding
+/// fourteen `<li>`, and because a third of their text sits in links the group reads as a listing at
+/// `mean_link_density` 0.36, over the 0.3 bar. At 61% of the page's prose it passed
+/// `DOMINANT_SHARE` too, so the article was withheld and the page came back `IndexPage`. Nothing
+/// was wrong with the region -- the anchor had already selected it.
+///
+/// Marking up a region as `<main>`, `<article>`, `role="main"` or `itemprop="articleBody"` is a
+/// claim a front page does not make about its own item list, and on a genuine index page the
+/// repeated group is not contained in an anchored region, so the veto still fires there. Both
+/// halves are required: an anchor alone would disarm it on any page with a `<main>`.
+fn inside_a_declared_article(
+    arena: &Arena,
+    selection: &crate::score::Selection,
+    node: crate::NodeId,
+) -> bool {
+    if !selection.region_from_semantic_anchor {
+        return false;
+    }
+    let Some(region) = selection.article else { return false };
+    let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
+    node.idx() > region.idx() && node.idx() < end
 }
 
 /// Fill in how much of the thread is present, and how we know.
@@ -848,13 +884,28 @@ mod tests {
             mean_first_link_share: 0.6,
             by_identity: false,
         };
+        // Nothing anchored, so containment cannot disarm the veto here.
+        let arena = Arena::default();
+        let nowhere = crate::score::Selection {
+            article: None,
+            no_article: None,
+            confidence: 0,
+            dispersion_floor_used: false,
+            region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
+        };
+
         assert!(small.is_listing());
         assert!(
-            !dominant_listing(core::slice::from_ref(&small), 10_000, None),
+            !dominant_listing(&arena, &nowhere, core::slice::from_ref(&small), 10_000, None),
             "5% of the page is not dominant"
         );
 
         let big = Group { prose_len: 9_000, ..small };
-        assert!(dominant_listing(&[big], 10_000, None), "90% of the page is a listing");
+        assert!(
+            dominant_listing(&arena, &nowhere, &[big], 10_000, None),
+            "90% of the page is a listing"
+        );
     }
 }
