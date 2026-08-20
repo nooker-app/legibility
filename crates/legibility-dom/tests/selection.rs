@@ -772,11 +772,21 @@ fn timeline_events_are_not_comments_but_paragraphs_still_are() {
     assert_eq!(real, 18, "a genuine thread was lost to the paragraph rule");
 }
 
+/// A thread of one is found, and a thread we genuinely cannot find still says so.
+///
+/// These are two halves of the same promise and they used to be one test, because the first half was
+/// impossible: every path into group detection needs look-alike siblings, and a single reply has
+/// nothing to repeat. The old test asserted that limitation — `items.is_empty() && truncated` — and
+/// so the honest reporting was all there was.
+///
+/// `groups::lone_comment` closes it by trusting the page's own count exactly as
+/// `Group::is_comment_thread` already does to admit a *pair* below `MIN_GROUP`. So the first half
+/// now asserts the comment is read. The second half is unchanged and still matters: when the
+/// replies are not in the HTML at all, as Reddit's `load more comments` stub leaves them, there is
+/// nothing to find and saying `count: 0` without a claim is the silent omission plan §1.9 exists to
+/// make impossible.
 #[test]
-fn a_thread_we_could_not_find_is_reported_as_incomplete_rather_than_absent() {
-    // A topic with one reply: a lone element cannot form a repeated group, so detection finds
-    // nothing. Reporting `count: 0` with no claim is the silent omission plan §1.9 exists to make
-    // impossible — the caller cannot tell "no comments" from "we missed them".
+fn a_thread_of_one_is_found_and_a_thread_that_is_absent_is_reported() {
     let html = "<html><head><title>Irken, a small IRC client | GeekNews</title></head>\
         <body><main><article>\
         <div class=\"topicinfo\">1P by <a href=\"/@neo\">GN⁺</a> \
@@ -793,9 +803,28 @@ fn a_thread_we_could_not_find_is_reported_as_incomplete_rather_than_absent() {
     let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
     let c = &out.comments.completeness;
     assert_eq!(c.claimed_total, Some(1), "the page's own count was not reported");
+    assert_eq!(out.comments.items.len(), 1, "the one comment on the page was not found");
+    assert!(!c.truncated, "a complete thread of one was reported as truncated");
+    let item = &out.comments.items[0];
+    assert_eq!(item.author.as_deref(), Some("사용자1"), "wrong author: {:?}", item.author);
+    assert!(item.text.contains("직접 고쳐 쓸 수 있는"), "wrong text: {}", item.text);
+
+    // The other half: the page claims replies that are not in the markup at all.
+    let stub = "<html><head><title>A post : r/rss</title></head><body><main>\
+        <div><a href=\"/r/rss/\">r/rss</a><time datetime=\"2026-08-05T22:05:33+09:00\">12d</time>\
+        <a href=\"/user/someone/\">someone</a></div>\
+        <h1>A post with a thread that did not render</h1>\
+        <div><p>The body of the post, long enough to be selected as the article region here.</p>\
+        </div>\
+        <div><a href=\"?comments=1\">42 comments</a></div>\
+        <button>load more comments</button></main></body></html>";
+    let (arena, _) = BuildArena::parse_to_arena(stub, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    let c = &out.comments.completeness;
+    assert_eq!(c.claimed_total, Some(42), "the page's own count was not reported");
     assert!(
         out.comments.items.is_empty() && c.truncated,
-        "present {} with truncated {} — a short thread must say so",
+        "present {} of a claimed 42 with truncated {} — a missing thread must say so",
         c.present,
         c.truncated
     );

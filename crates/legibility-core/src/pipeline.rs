@@ -109,7 +109,14 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         // Filling completeness anyway turns it into `0 of 1, truncated`, which is what actually
         // happened.
         _ => {
-            let mut set = CommentSet::default();
+            // Repetition found nothing. If the page says it has exactly one comment, there is
+            // nothing to repeat -- see `groups::lone_comment`, which trusts the stated count the
+            // same way `is_comment_thread` already does to admit a pair.
+            let lone = groups::lone_comment(arena, stated_total, selection.article);
+            let mut set = match &lone {
+                Some(g) => comments::extract(arena, g, limits.max_comment_items),
+                None => CommentSet::default(),
+            };
             fill_completeness(arena, &mut set, stated_total);
             set
         }

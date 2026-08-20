@@ -19,19 +19,28 @@
   },
   "no_article":null,
   "comments":{
-    "count":0,
-    "depth_source":null,
+    "count":1,
+    "depth_source":"CssVariable",
     "completeness":{
-      "present":0,
+      "present":1,
       "claimed_total":1,
-      "truncated":true,
+      "truncated":false,
       "reason":null,
       "continuation":[
         
       ]
     },
     "items":[
-      
+      {
+        "author":"사용자0",
+        "timestamp":"2026-08-05T23:00:00+09:00",
+        "depth":0,
+        "parent":null,
+        "permalink":"#comment_thread",
+        "deleted":false,
+        "text":"▲ [-] 이 기능은 정말 기대되네요. 터미널을 떠나지 않고 작업할 수 있다는 점이 특히 좋습니다. 첫째 이유 둘째 이유",
+        "html":"<div><span><p>이 기능은 <strong>정말</strong> 기대되네요. 터미널을 떠나지 않고 작업할 수 있다는 점이 특히 좋습니다.</p><ul><li>첫째 이유</li><li>둘째 이유</li></ul></span></div>"
+      }
     ]
   },
   "metadata":{
@@ -99,7 +108,7 @@
     "page_hidden_len":0,
     "page_alt_len":0,
     "page_inert_len":25,
-    "discussion_shape":null,
+    "discussion_shape":"with-body",
     "limits_hit":[
       
     ]

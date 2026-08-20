@@ -589,6 +589,96 @@ pub fn find_groups(arena: &Arena) -> Vec<Group> {
     groups
 }
 
+/// Diagnostic only: which of the three comment-shape predicates a node satisfies.
+#[doc(hidden)]
+#[must_use]
+pub fn debug_probes(arena: &Arena, node: NodeId) -> (bool, bool, bool) {
+    let end = arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize;
+    (
+        has_author_link(arena, node, end),
+        has_timestamp(arena, node, end),
+        has_paragraph(arena, node, end),
+    )
+}
+
+/// The one comment on a page that says it has one.
+///
+/// # Why repetition cannot find this
+///
+/// Every path into [`find_groups`] needs at least [`MIN_SIBLINGS`] look-alike children, because a
+/// repeated template is the evidence it trusts. A thread of one has no repetition in it at all:
+/// `news.hada.io/topic?id=32177` renders `<div id="comment_thread">` around a single
+/// `<div class="comment_row">`, the parent is skipped for having one element child, no group is
+/// built, and the page reports `present: 0, claimed_total: 1, truncated: true`. Honest, and still a
+/// comment we failed to read.
+///
+/// # What is trusted instead
+///
+/// The page's own count, exactly as [`Group::is_comment_thread`] already trusts it to admit a
+/// *pair* below `MIN_GROUP` — "requiring an exact match rather than a floor is what makes it
+/// evidence". The same argument reaches one, and this is deliberately the narrowest form of it:
+///
+/// - it runs only when the page states **exactly one** comment;
+/// - the document must contain **exactly one** element with a comment's shape — an author link and
+///   a timestamp, and an authored paragraph. Two candidates and it declines, because then the count
+///   corroborates nothing;
+/// - the candidate must not be an ancestor or descendant of the article region, so a byline inside
+///   the body cannot be promoted into a thread.
+///
+/// A page that states no total cannot reach this, which is most of the web.
+#[must_use]
+pub fn lone_comment(
+    arena: &Arena,
+    stated_total: Option<u32>,
+    region: Option<NodeId>,
+) -> Option<Group> {
+    if stated_total != Some(1) {
+        return None;
+    }
+    let (region_start, region_end) = match region {
+        Some(r) => (r.idx(), arena.subtree_end.get(r.idx()).copied().unwrap_or(0) as usize),
+        None => (usize::MAX, usize::MAX),
+    };
+
+    let mut found: Option<NodeId> = None;
+    for i in 0..arena.len() {
+        if arena.kind.get(i).copied() != Some(NodeKind::Element) {
+            continue;
+        }
+        // Inside the article, or wrapping it: a dateline is not a reply.
+        let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        if region_start != usize::MAX
+            && (i > region_start && i < region_end || end >= region_end && i <= region_start)
+        {
+            continue;
+        }
+        let node = NodeId(i as u32);
+        if !has_author_link(arena, node, end)
+            || !has_timestamp(arena, node, end)
+            || !holds_written_content(arena, node, end)
+        {
+            continue;
+        }
+        // The outermost such element, not every ancestor of it. A comment's wrapper carries the
+        // same author link and timestamp as the comment does.
+        if found.is_some_and(|f| {
+            let fe = arena.subtree_end.get(f.idx()).copied().unwrap_or(0) as usize;
+            i > f.idx() && i < fe
+        }) {
+            continue;
+        }
+        if found.is_some() {
+            // A second, unrelated candidate. The count no longer distinguishes anything.
+            return None;
+        }
+        found = Some(node);
+    }
+
+    let node = found?;
+    let parent = arena.parent.get(node.idx()).copied()?;
+    Some(describe(arena, parent, signature(arena, node), alloc::vec![node]))
+}
+
 /// One group of siblings sharing a tag and a non-empty class, when enough of them do.
 ///
 /// Requires a class: a bare `(tag, 0)` identity would group every unadorned `<div>` under a parent,
@@ -702,6 +792,31 @@ fn describe(arena: &Arena, parent: NodeId, signature: u64, members: Vec<NodeId>)
 /// timeline back in — its commit rows carry three `<pre>` blocks for the hashes, so the ratio came
 /// out at 1.0 on a group with zero paragraphs. A `<pre>` is a verbatim block, which is evidence that
 /// someone pasted something, not that someone wrote something.
+/// Written content, for [`lone_comment`] only: a `<p>`, a `<blockquote>`, or a list carrying prose.
+///
+/// [`has_paragraph`] is deliberately narrower -- it exists so that a run of GitHub timeline events
+/// (`added 3 commits`, `mentioned this pull request`) is not read as a thread, and those carry an
+/// author link and a timestamp exactly as a comment does. But a comment is not obliged to contain a
+/// `<p>`: the single reply on `news.hada.io/topic?id=32177` is an `<h6>` and a `<ul>`, and requiring
+/// a paragraph is why it was missed.
+///
+/// So `<li>` counts here, guarded by link density on the same bar
+/// [`Group::is_comment_thread`] uses, which is what keeps a nav menu or a related-links rail out --
+/// their text is almost entirely inside anchors and a written reply's is not.
+fn holds_written_content(arena: &Arena, node: NodeId, end: usize) -> bool {
+    if has_paragraph(arena, node, end) {
+        return true;
+    }
+    if arena.link_density(node) > 0.5 {
+        return false;
+    }
+    (node.idx()..end.min(arena.len())).any(|i| {
+        arena.kind.get(i).copied() == Some(NodeKind::Element)
+            && arena.tag.get(i).copied() == Some(TagId::LI)
+            && arena.prose_len.get(i).copied().unwrap_or(0) > 0
+    })
+}
+
 fn has_paragraph(arena: &Arena, node: NodeId, end: usize) -> bool {
     (node.idx()..end.min(arena.len())).any(|i| {
         arena.kind.get(i).copied() == Some(NodeKind::Element)
