@@ -1508,3 +1508,47 @@ fn a_page_that_is_mostly_links_has_no_article() {
     assert_ne!(tag, "none", "a link-heavy article was refused");
     assert!(text.contains("A paragraph of real body text"), "the body was lost: {text}");
 }
+
+/// A comment's `text` and its `html` must not disagree about what the comment says.
+///
+/// They did. `html` is serialized from the item's content child, while `text` spanned the whole item
+/// and skipped only the author and the timestamp — so on any template that puts controls in the
+/// credit bar, `text` carried them and `html` did not. GeekNews puts a vote arrow and a collapse
+/// toggle there, and every comment's `text` opened with `▲ [-]`.
+///
+/// It matters because the two are read by different consumers: a reader view renders `html`, and a
+/// search index, a notification or a plain-text digest renders `text`. Only the second was wrong,
+/// which is why it survived so long.
+#[test]
+fn a_comments_text_carries_no_controls_that_its_html_leaves_out() {
+    let mut items = String::new();
+    for i in 0..3 {
+        items.push_str(&format!(
+            "<div class=\"comment_row\" id=\"cid{i}\">\
+             <div class=\"commentinfo\">\
+               <a href=\"javascript:vote({i})\">&#9650;</a>\
+               <a href=\"javascript:toggle({i})\"><span>[-]</span></a>\
+               <a href=\"/@user{i}\">user{i}</a>\
+               <time datetime=\"2026-08-05T23:0{i}:00+09:00\">19시간전</time></div>\
+             <div class=\"commentTD\"><span><p>A reply with real words in it, number {i}.</p>\
+               </span></div></div>"
+        ));
+    }
+    let html = format!(
+        "<html><head><title>A topic | Example</title></head><body><main><article>\
+         <section itemprop=\"articleBody\"><p>The submission body, long enough to be the article \
+         region on this page rather than furniture.</p></section>\
+         <div id=\"comment_thread\">{items}</div></article></main></body></html>"
+    );
+
+    let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+    assert_eq!(out.comments.items.len(), 3, "the thread was not found");
+    for it in &out.comments.items {
+        assert!(!it.text.contains('▲'), "a vote arrow reached `text`: {}", it.text);
+        assert!(!it.text.contains("[-]"), "a collapse toggle reached `text`: {}", it.text);
+        assert!(it.text.contains("A reply with real words"), "the body was lost: {}", it.text);
+        // And the author is not repeated inside the body it is already a field of.
+        assert!(!it.text.contains("user"), "the byline reached `text`: {}", it.text);
+    }
+}

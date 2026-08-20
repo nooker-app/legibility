@@ -250,7 +250,23 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
     }
 
     let body = content_child(arena, m, end, &[author_node, time_node]);
-    let text = subtree_prose_excluding(arena, m, &[author_node, time_node]);
+    // One exclusion set for both `text` and `html`, computed once.
+    //
+    // `text` used to exclude only the author and the timestamp while `html` excluded the whole
+    // byline-and-furniture set, so the same item disagreed with itself: GeekNews puts a vote arrow
+    // and a collapse toggle in the credit bar, and every comment's `text` opened with `▲ [-]`
+    // while its `html` correctly did not. A consumer rendering `text` -- a search index, a
+    // notification, a plain-text digest -- got the controls; one rendering `html` did not.
+    let byline = byline_and_furniture(arena, m, end, body, &[author_node, time_node]);
+    // Over the same node `html` is built from, with the same exclusions, so the two cannot
+    // disagree about what the comment says.
+    //
+    // They did. `html` serializes `body` -- the content child, which on most templates is already
+    // inside the credit bar's sibling -- while `text` spanned the whole item and skipped only the
+    // author and the timestamp. GeekNews puts a vote arrow and a collapse toggle in that bar, so
+    // every comment's `text` opened with `▲ [-]` and its `html` did not. A consumer rendering
+    // `text` (a search index, a notification, a plain-text digest) got the controls.
+    let text = subtree_prose_excluding(arena, body.unwrap_or(m), &byline);
     let lower_owned = text.to_lowercase();
     let lower = lower_owned.as_str();
     let flags = Flags {
@@ -267,7 +283,7 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
         author,
         timestamp,
         body,
-        byline: byline_and_furniture(arena, m, end, body, &[author_node, time_node]),
+        byline,
         text,
         depth: 0,
         parent: None,
@@ -411,14 +427,14 @@ fn subtree_prose(arena: &Arena, node: NodeId) -> String {
 /// Only the nodes the values were actually read from are excluded, not a whole metadata container:
 /// which element wraps the byline is a per-site question, whereas "the `<a>` I took the author from"
 /// is not.
-fn subtree_prose_excluding(arena: &Arena, node: NodeId, skip: &[Option<NodeId>]) -> String {
+fn subtree_prose_excluding(arena: &Arena, node: NodeId, skip: &[NodeId]) -> String {
     let end = arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize;
     let mut out = String::new();
     let mut i = node.idx();
     while i < end {
         // Jump the whole excluded subtree rather than filtering node by node, so nested markup
         // inside a byline (`<a><span>name</span></a>`) cannot leak a fragment through.
-        if let Some(s) = skip.iter().flatten().find(|s| s.idx() == i) {
+        if let Some(s) = skip.iter().find(|s| s.idx() == i) {
             i = arena.subtree_end.get(s.idx()).copied().unwrap_or(0) as usize;
             continue;
         }
