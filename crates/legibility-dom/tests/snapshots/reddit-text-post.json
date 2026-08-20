@@ -8,7 +8,7 @@
     "kind":"article",
     "url":"https://www.example.test/es/",
     "prose_len":220,
-    "confidence":7729,
+    "confidence":7084,
     "dropped_subtrees":8,
     "unwrapped":2,
     "truncated":false,

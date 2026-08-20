@@ -1552,3 +1552,47 @@ fn a_comments_text_carries_no_controls_that_its_html_leaves_out() {
         assert!(!it.text.contains("user"), "the byline reached `text`: {}", it.text);
     }
 }
+
+/// Elements holding no prose must not dilute a region's density.
+///
+/// `density` answers "how much of this region is writing rather than markup", and it divided prose
+/// by *every* element in the subtree. An element with no text in it is not markup wrapped around
+/// writing though — it is furniture standing beside it, and counting it punished exactly the
+/// containers that are the answer.
+///
+/// `simplyfound-1` is the corpus case: its real body is 34 image-carousel elements with no prose out
+/// of 55, cutting its density to 33.53 against a two-element lead paragraph's 179.67 — so a fragment
+/// holding 20% of the page beat the container holding 70% of it, and the page scored 0.426.
+#[test]
+fn empty_chrome_does_not_dilute_the_density_of_the_body_that_holds_it() {
+    // A body of four real paragraphs, buried in a carousel of empty markup.
+    let paras: String = (0..4)
+        .map(|i| {
+            format!(
+                "<p>Paragraph {i} of the actual article body, with enough words in it that the \
+                 region is unambiguously the thing a reader came for.</p>"
+            )
+        })
+        .collect();
+    let chrome: String =
+        (0..30).map(|i| format!("<div class=\"slide s{i}\"><span></span><i></i></div>")).collect();
+    // Long, and in one element: density is prose over elements, so this is the shape that used to
+    // win outright. With the old denominator it scored 41.9 against the body's 3.5.
+    let lead = "A single dense lead sentence that is deliberately long, because density is prose \
+                over elements and one element holding a great deal of text is the shape that used \
+                to win this comparison despite holding far less of the page than the body does.";
+
+    // No `<main>` and no `<article>`: a semantic anchor would decide this before density was
+    // consulted, and then the test would pass whatever density did.
+    let html = format!(
+        "<html><head><title>An article with a carousel | Example</title></head><body>\
+         <div class=\"page\">\
+         <div class=\"card-box-body\"><div class=\"carousel\">{chrome}</div>{paras}</div>\
+         <div class=\"lead\"><p>{lead}</p></div>\
+         </div></body></html>"
+    );
+
+    let (_, text, _) = extract(&html);
+    assert!(text.contains("Paragraph 3 of the actual"), "the body was lost: {text}");
+    assert!(text.contains("Paragraph 0 of the actual"), "the body was truncated: {text}");
+}

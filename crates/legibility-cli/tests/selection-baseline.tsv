@@ -79,7 +79,7 @@ nytimes-4	0.8826
 nytimes-5	0.5009
 ol	1.0000
 parsely-metadata	0.9892
-pixnet	0.9126
+pixnet	0.9716
 qq	0.8000
 quanta-1	0.7078
 remove-aria-hidden	0.9863
@@ -89,7 +89,7 @@ remove-script-tags	0.9922
 reordering-paragraphs	1.0000
 replace-brs	0.9922
 replace-font-tags	1.0000
-royal-road	0.9998
+royal-road	0.9787
 rtl-1	1.0000
 rtl-2	1.0000
 rtl-3	1.0000
@@ -97,7 +97,7 @@ rtl-4	1.0000
 salon-1	0.9924
 schema-org-context-object	0.9729
 seattletimes-1	0.9796
-simplyfound-1	0.4260
+simplyfound-1	0.9318
 social-buttons	0.9943
 spiceworks	0.9837
 style-tags-removal	1.0000

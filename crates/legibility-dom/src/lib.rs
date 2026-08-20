@@ -262,6 +262,7 @@ impl BuildArena {
                     arena.inert_len.push(0);
                     arena.link_prose_len.push(0);
                     arena.element_count.push(0);
+                    arena.prose_element_count.push(0);
 
                     parent_stack.push(ai);
                     stack.push(Step::Exit(bi));

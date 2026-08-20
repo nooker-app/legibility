@@ -218,6 +218,10 @@ pub struct Arena {
     pub link_prose_len: Vec<u32>,
     /// Count of descendant elements, including this node if it is one. Denominator of text density.
     pub element_count: Vec<u32>,
+    /// Elements in the subtree that hold prose, themselves or below.
+    ///
+    /// The denominator [`Arena::text_density`] actually wants. See that method.
+    pub prose_element_count: Vec<u32>,
 
     // ---- attributes, as ranges into a flat table ----
     /// Index of this node's first attribute in [`Arena::attrs`].
@@ -377,6 +381,12 @@ impl Arena {
 
             if self.kind.get(i).copied() == Some(NodeKind::Element) {
                 add_at(&mut self.element_count, i, 1);
+                // Counted here, in the reverse pass, because children have already folded into
+                // this node -- so `prose_len[i]` is final and this is the only place the question
+                // "does this element hold any prose at all" can be answered in one pass.
+                if self.prose_len.get(i).copied().unwrap_or(0) > 0 {
+                    add_at(&mut self.prose_element_count, i, 1);
+                }
                 // An <a> contributes its whole prose subtree to the link numerator. Done here,
                 // after children have folded up, so the subtree total is already final.
                 if self.tag.get(i).copied() == Some(a_tag) && !self.wraps_blocks_and_goes_nowhere(i)
@@ -400,6 +410,7 @@ impl Arena {
                 &mut self.inert_len,
                 &mut self.link_prose_len,
                 &mut self.element_count,
+                &mut self.prose_element_count,
             ] {
                 let v = col.get(i).copied().unwrap_or(0);
                 add_at(col, p, v);
@@ -452,7 +463,16 @@ impl Arena {
     #[must_use]
     pub fn text_density(&self, n: NodeId) -> f32 {
         let prose = self.prose_len.get(n.idx()).copied().unwrap_or(0);
-        let elems = self.element_count.get(n.idx()).copied().unwrap_or(0);
+        // Elements that hold prose, not every element. Density is meant to say "how much of this
+        // region is writing rather than markup", and an element with no text in it is not markup
+        // wrapped around writing -- it is furniture beside it.
+        //
+        // Counting it punished exactly the containers that are the answer. `simplyfound-1`'s real
+        // body is 34 image-carousel elements with no prose out of 55, which cut its density to
+        // 33.53 against a two-element lead paragraph's 179.67 -- so a fragment holding 20% of the
+        // page beat the container holding 70% of it. `ehow-1` is the same shape at 12 `div.mod
+        // step` blocks each wrapped in figure/figcaption/span.
+        let elems = self.prose_element_count.get(n.idx()).copied().unwrap_or(0);
         crate::num::guarded_div(prose as f32, elems as f32)
     }
 }
