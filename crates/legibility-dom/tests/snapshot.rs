@@ -60,12 +60,83 @@ fn cases() -> Vec<(&'static str, String)> {
         ("timeline-events-are-not-comments", timeline_events()),
         ("nav-inside-main-is-not-body", nav_inside_main()),
         ("reddit-credit-bar-without-comments", reddit_credit_bar_only()),
+        ("reddit-nested-thread", reddit_nested_thread()),
     ]
 }
 
 // ---------------------------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------------------------
+
+/// Reddit, S-2 with a **nested** thread: five roots, one carrying two replies and a reply to one of
+/// them.
+///
+/// Reported against `reddit.com/r/rss/comments/1vsw2th`: replies were not separated and a comment
+/// carried its descendants' content. Two defects, and the first hid the second.
+///
+/// Rendered Reddit builds a thread from `<shreddit-comment>` elements with **no class**, and
+/// identity expansion required one — so nested replies could not be recognised at all and neither
+/// could the root that held them. Before the fix this fixture returned four of its eight comments,
+/// `depth_source: Flat`, every depth 0: the four childless roots, with the whole nested branch and
+/// its parent missing.
+///
+/// With them found, the reported symptom appeared: a `<shreddit-comment>` with replies *contains*
+/// them, so the root's `text` and `html` carried its children's authors, timestamps and bodies.
+fn reddit_nested_thread() -> String {
+    fn comment(id: &str, author: &str, depth: u8, text: &str, children: &str) -> String {
+        format!(
+            "<shreddit-comment thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\" \
+             permalink=\"/r/rss/comments/x/_/{id}/\">\
+             <div slot=\"commentMeta\"><a href=\"/user/{author}/\">{author}</a>\
+               <time datetime=\"2026-08-1{depth}T10:00:00Z\">2d ago</time></div>\
+             <div slot=\"comment\"><p>{text}</p></div>\
+             <div slot=\"actionRow\"><button>Reply</button></div>\
+             {children}</shreddit-comment>"
+        )
+    }
+
+    let grandchild =
+        comment("g1", "carol", 2, "I switched to Feedly years ago and never looked back.", "");
+    let child_one = comment(
+        "k1",
+        "bob",
+        1,
+        "Yes, I still use RSS every single day for tech news.",
+        &grandchild,
+    );
+    let child_two =
+        comment("k2", "erin", 1, "Same here, though I moved to a self-hosted reader.", "");
+    let roots = [
+        comment(
+            "r1",
+            "alice",
+            0,
+            "Do you still use RSS in 2026? I certainly do, every day.",
+            &format!("{child_one}{child_two}"),
+        ),
+        comment("r2", "dave", 0, "RSS is the last good protocol on the open web today.", ""),
+        comment("r3", "fay", 0, "I keep about forty feeds and read them each morning.", ""),
+        comment("r4", "gus", 0, "Newsletters replaced it for me, honestly speaking here.", ""),
+        comment("r5", "hal", 0, "Feed readers are niche now but the niche is healthy.", ""),
+    ]
+    .concat();
+
+    format!(
+        "<html><head><title>Do you still use RSS and feed reader apps in 2026? : r/rss</title>\
+         <meta property=\"og:site_name\" content=\"Reddit\"></head><body><main>\
+         <shreddit-post permalink=\"/r/rss/comments/x/\" comment-count=\"8\">\
+           <div slot=\"credit-bar\"><a href=\"/r/rss/\">r/rss</a>\
+             <time datetime=\"2026-08-10T20:36:22Z\">2d ago</time>\
+             <a href=\"/user/asker/\">asker</a></div>\
+           <h1 slot=\"title\">Do you still use RSS and feed reader apps in 2026?</h1>\
+           <shreddit-post-text-body slot=\"text-body\"><div><p>I am curious whether people still \
+             keep a feed reader in their daily rotation, or whether it has all moved to \
+             newsletters.</p></div></shreddit-post-text-body>\
+         </shreddit-post>\
+         <shreddit-comment-tree id=\"comment-tree\">{roots}</shreddit-comment-tree>\
+         </main></body></html>"
+    )
+}
 
 /// Reddit, S-1: the submission is a title and an outbound link, and its "body" is one bare anchor
 /// the poster pasted wrongly. Reported as a defect — the pointer was being served as an article.

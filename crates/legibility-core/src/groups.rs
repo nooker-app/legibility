@@ -434,26 +434,41 @@ fn has_heading(arena: &Arena, node: NodeId, end: usize) -> bool {
     })
 }
 
-/// Every element in the document whose `(tag, class)` matches this group's members.
+/// What a site is claiming an element *is*, if it claims anything.
+///
+/// `(tag, class_bits)` when the element carries a class, because a bare `(tag, 0)` would group every
+/// unadorned `<div>` under a parent and that is not the site saying anything.
+///
+/// **Unless the tag is a custom element**, and then the tag alone is the claim. A custom element
+/// name is required by the HTML spec to contain a hyphen and no standard element's does, so
+/// `shreddit-comment` is as specific as any class and considerably more honest. Reddit's rendered
+/// thread is built from `<shreddit-comment>` with no class at all, so requiring one meant a reply
+/// could never be recognised by identity: on a five-root thread with three nested replies we
+/// returned four comments, silently dropping the nested ones *and the root that held them*.
+fn identity_of(arena: &Arena, node: NodeId) -> Option<(u16, u64)> {
+    let tag = arena.tag.get(node.idx()).copied().unwrap_or(TagId::UNKNOWN);
+    let bits = class_bits(arena, node);
+    if bits != 0 {
+        return Some((tag.0, bits));
+    }
+    arena.tag_name(node).is_some_and(|n| n.contains('-')).then_some((tag.0, 0))
+}
+
+/// Every element in the document sharing this group's members' [`identity_of`].
 ///
 /// Used so a thread of one -- a lone reply with no siblings, which can never form a group -- is
-/// still returned as a comment.
+/// still returned as a comment, and so a nested reply is found at all.
 #[must_use]
 pub fn members_by_identity(arena: &Arena, group: &Group) -> Vec<NodeId> {
     let Some(&first) = group.members.first() else { return Vec::new() };
-    let want =
-        (arena.tag.get(first.idx()).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, first));
-    if want.1 == 0 {
-        return group.members.clone();
-    }
+    let Some(want) = identity_of(arena, first) else { return group.members.clone() };
     let mut out = Vec::new();
     for i in 0..arena.len() {
         if arena.kind.get(i).copied() != Some(NodeKind::Element) {
             continue;
         }
         let node = NodeId(i as u32);
-        let got = (arena.tag.get(i).copied().unwrap_or(TagId::UNKNOWN).0, class_bits(arena, node));
-        if got == want {
+        if identity_of(arena, node) == Some(want) {
             out.push(node);
         }
     }

@@ -1596,3 +1596,71 @@ fn empty_chrome_does_not_dilute_the_density_of_the_body_that_holds_it() {
     assert!(text.contains("Paragraph 3 of the actual"), "the body was lost: {text}");
     assert!(text.contains("Paragraph 0 of the actual"), "the body was truncated: {text}");
 }
+
+/// A nested reply belongs to itself, not to the comment that contains it.
+///
+/// Reported against `reddit.com/r/rss/comments/1vsw2th`. Two defects, and the first hid the second.
+///
+/// Rendered Reddit builds a thread from `<shreddit-comment>` elements carrying **no class**, and
+/// identity expansion required one, so nested replies were invisible — and so was the root holding
+/// them. A five-root thread with three nested replies returned four comments, all depth 0,
+/// `depth_source: Flat`. Once found, the reported symptom appeared: a `<shreddit-comment>` with
+/// replies *contains* them, so a parent's `text` and `html` carried its descendants' authors,
+/// timestamps and bodies, and the top comment of a deep thread repeated the whole thread.
+///
+/// The snapshot `reddit-nested-thread` pins the whole output; this asserts the two facts.
+#[test]
+fn a_nested_reply_is_its_own_comment_and_not_part_of_its_parent() {
+    fn comment(id: &str, author: &str, depth: u8, text: &str, children: &str) -> String {
+        format!(
+            "<shreddit-comment thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\">\
+             <div slot=\"commentMeta\"><a href=\"/user/{author}/\">{author}</a>\
+               <time datetime=\"2026-08-1{depth}T10:00:00Z\">2d ago</time></div>\
+             <div slot=\"comment\"><p>{text}</p></div>{children}</shreddit-comment>"
+        )
+    }
+    let deep = comment("g1", "carol", 2, "GRANDCHILD only text here.", "");
+    let mid = comment("k1", "bob", 1, "CHILD only text here.", &deep);
+    let mut thread = comment("r1", "alice", 0, "ROOT only text here.", &mid);
+    for (i, (id, who)) in [("r2", "dave"), ("r3", "fay"), ("r4", "gus")].iter().enumerate() {
+        thread.push_str(&comment(id, who, 0, &format!("SIBLING {i} only text here."), ""));
+    }
+    let html = format!(
+        "<html><head><title>A thread : r/rss</title></head><body><main>\
+         <shreddit-post comment-count=\"6\">\
+           <div slot=\"credit-bar\"><a href=\"/r/rss/\">r/rss</a>\
+             <time datetime=\"2026-08-10T20:36:22Z\">2d ago</time>\
+             <a href=\"/user/asker/\">asker</a></div>\
+           <h1 slot=\"title\">A thread</h1>\
+           <shreddit-post-text-body slot=\"text-body\"><div><p>The submission body, long enough \
+             to stand as the article region on this page.</p></div></shreddit-post-text-body>\
+         </shreddit-post>\
+         <shreddit-comment-tree>{thread}</shreddit-comment-tree></main></body></html>"
+    );
+
+    let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+
+    // Found at all: a class-less custom element is still an identity.
+    assert_eq!(out.comments.items.len(), 6, "nested replies were not found");
+    let depths: Vec<u16> = out.comments.items.iter().map(|c| c.depth).collect();
+    assert_eq!(depths, vec![0, 1, 2, 0, 0, 0], "nesting was flattened: {depths:?}");
+
+    // And each one holds only itself.
+    let by_author = |a: &str| {
+        out.comments
+            .items
+            .iter()
+            .find(|c| c.author.as_deref() == Some(a))
+            .unwrap_or_else(|| panic!("no comment by {a}"))
+    };
+    let root = by_author("alice");
+    assert!(root.text.contains("ROOT only"), "the root lost its own text: {}", root.text);
+    assert!(!root.text.contains("CHILD"), "a child leaked into its parent: {}", root.text);
+    assert!(!root.text.contains("GRANDCHILD"), "a grandchild leaked in: {}", root.text);
+    assert!(!root.text.contains("bob"), "a child's byline leaked in: {}", root.text);
+
+    let mid = by_author("bob");
+    assert!(mid.text.contains("CHILD only"), "the reply lost its own text: {}", mid.text);
+    assert!(!mid.text.contains("GRANDCHILD"), "a grandchild leaked into its parent: {}", mid.text);
+}

@@ -1,0 +1,186 @@
+{
+  "schema_version":1,
+  "url":null,
+  "article":{
+    "html":"<main><div><p>I am curious whether people still keep a feed reader in their daily rotation, or whether it has all moved to newsletters.</p></div></main>",
+    "text":"I am curious whether people still keep a feed reader in their daily rotation, or whether it has all moved to newsletters.",
+    "tag":"main",
+    "kind":"article",
+    "url":null,
+    "prose_len":0,
+    "confidence":5022,
+    "dropped_subtrees":3,
+    "unwrapped":2,
+    "truncated":false,
+    "dispersion_floor":false,
+    "from_semantic_anchor":true,
+    "signal_conflict":false,
+    "calibrated":false
+  },
+  "no_article":null,
+  "comments":{
+    "count":8,
+    "depth_source":"DomNesting",
+    "completeness":{
+      "present":8,
+      "claimed_total":null,
+      "truncated":false,
+      "reason":null,
+      "continuation":[
+        
+      ]
+    },
+    "items":[
+      {
+        "author":"alice",
+        "timestamp":"2026-08-10T10:00:00Z",
+        "depth":0,
+        "parent":null,
+        "permalink":null,
+        "deleted":false,
+        "text":"Do you still use RSS in 2026? I certainly do, every day.",
+        "html":"<div><p>Do you still use RSS in 2026? I certainly do, every day.</p></div>"
+      },
+      {
+        "author":"bob",
+        "timestamp":"2026-08-11T10:00:00Z",
+        "depth":1,
+        "parent":0,
+        "permalink":null,
+        "deleted":false,
+        "text":"Yes, I still use RSS every single day for tech news.",
+        "html":"<div><p>Yes, I still use RSS every single day for tech news.</p></div>"
+      },
+      {
+        "author":"carol",
+        "timestamp":"2026-08-12T10:00:00Z",
+        "depth":2,
+        "parent":1,
+        "permalink":null,
+        "deleted":false,
+        "text":"I switched to Feedly years ago and never looked back.",
+        "html":"<div><p>I switched to Feedly years ago and never looked back.</p></div>"
+      },
+      {
+        "author":"erin",
+        "timestamp":"2026-08-11T10:00:00Z",
+        "depth":1,
+        "parent":0,
+        "permalink":null,
+        "deleted":false,
+        "text":"Same here, though I moved to a self-hosted reader.",
+        "html":"<div><p>Same here, though I moved to a self-hosted reader.</p></div>"
+      },
+      {
+        "author":"dave",
+        "timestamp":"2026-08-10T10:00:00Z",
+        "depth":0,
+        "parent":null,
+        "permalink":null,
+        "deleted":false,
+        "text":"RSS is the last good protocol on the open web today.",
+        "html":"<div><p>RSS is the last good protocol on the open web today.</p></div>"
+      },
+      {
+        "author":"fay",
+        "timestamp":"2026-08-10T10:00:00Z",
+        "depth":0,
+        "parent":null,
+        "permalink":null,
+        "deleted":false,
+        "text":"I keep about forty feeds and read them each morning.",
+        "html":"<div><p>I keep about forty feeds and read them each morning.</p></div>"
+      },
+      {
+        "author":"gus",
+        "timestamp":"2026-08-10T10:00:00Z",
+        "depth":0,
+        "parent":null,
+        "permalink":null,
+        "deleted":false,
+        "text":"Newsletters replaced it for me, honestly speaking here.",
+        "html":"<div><p>Newsletters replaced it for me, honestly speaking here.</p></div>"
+      },
+      {
+        "author":"hal",
+        "timestamp":"2026-08-10T10:00:00Z",
+        "depth":0,
+        "parent":null,
+        "permalink":null,
+        "deleted":false,
+        "text":"Feed readers are niche now but the niche is healthy.",
+        "html":"<div><p>Feed readers are niche now but the niche is healthy.</p></div>"
+      }
+    ]
+  },
+  "metadata":{
+    "title":{
+      "value":"Do you still use RSS and feed reader apps in 2026?",
+      "source":"h1",
+      "confidence":60,
+      "span":[
+        165,
+        215
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "title_without_site_name":null,
+    "site_name":{
+      "value":"Reddit",
+      "source":"open-graph",
+      "confidence":85,
+      "span":[
+        70,
+        76
+      ],
+      "transforms":[
+        "EntityDecodedByParser"
+      ],
+      "verbatim_ok":true
+    },
+    "language":null,
+    "description":null,
+    "canonical_url":null,
+    "authors":[
+      
+    ],
+    "published":{
+      "candidate":{
+        "value":"2026-08-10T20:36:22Z",
+        "source":"time-element",
+        "confidence":75,
+        "span":[
+          117,
+          137
+        ],
+        "transforms":[
+          "EntityDecodedByParser"
+        ],
+        "verbatim_ok":true
+      },
+      "raw":"2026-08-10T20:36:22Z",
+      "iso8601":"2026-08-10T20:36:22Z",
+      "tz_known":true
+    },
+    "modified":null,
+    "candidate_count":12
+  },
+  "page_kind":"article-or-discussion",
+  "comment_mask_reverted":false,
+  "group_count":1,
+  "diagnostics":{
+    "node_count":119,
+    "page_prose_len":687,
+    "page_control_len":40,
+    "page_hidden_len":0,
+    "page_alt_len":0,
+    "page_inert_len":58,
+    "discussion_shape":"with-body",
+    "limits_hit":[
+      
+    ]
+  }
+}

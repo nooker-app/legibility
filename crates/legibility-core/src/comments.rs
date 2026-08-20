@@ -172,7 +172,7 @@ pub fn extract(arena: &Arena, group: &Group, max_items: u32) -> CommentSet {
             hit_limit = true;
             break;
         }
-        set.items.push(item_of(arena, m));
+        set.items.push(item_of(arena, m, group.members.as_slice()));
     }
 
     let (depths, source) = resolve_depths(arena, group, set.items.len());
@@ -192,7 +192,7 @@ pub fn extract(arena: &Arena, group: &Group, max_items: u32) -> CommentSet {
     set
 }
 
-fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
+fn item_of(arena: &Arena, m: NodeId, all: &[NodeId]) -> CommentItem {
     let end = arena.subtree_end.get(m.idx()).copied().unwrap_or(0) as usize;
 
     let mut author = None;
@@ -257,7 +257,20 @@ fn item_of(arena: &Arena, m: NodeId) -> CommentItem {
     // and a collapse toggle in the credit bar, and every comment's `text` opened with `▲ [-]`
     // while its `html` correctly did not. A consumer rendering `text` -- a search index, a
     // notification, a plain-text digest -- got the controls; one rendering `html` did not.
-    let byline = byline_and_furniture(arena, m, end, body, &[author_node, time_node]);
+    let mut byline = byline_and_furniture(arena, m, end, body, &[author_node, time_node]);
+    // Replies nested inside this one are their own items, not part of this one's body.
+    //
+    // Reddit's rendered thread nests: a `<shreddit-comment>` with replies *contains* them, so a
+    // parent's subtree holds every descendant's text and byline. Left in, the first comment of a
+    // deep thread repeats the whole thread -- reported against
+    // `reddit.com/r/rss/comments/1vsw2th`, where the top comment carried its children's authors,
+    // timestamps and bodies. The same shape reaches old Reddit's `.child` divs and any forum that
+    // nests rather than indents.
+    //
+    // Nothing is lost by this: every excluded subtree is an item in its own right, joined back by
+    // `parent`. Only the *outermost* nested replies are listed, since excluding one skips its whole
+    // subtree anyway.
+    byline.extend(outermost_nested(arena, m, end, all));
     // Over the same node `html` is built from, with the same exclusions, so the two cannot
     // disagree about what the comment says.
     //
@@ -427,6 +440,26 @@ fn subtree_prose(arena: &Arena, node: NodeId) -> String {
 /// Only the nodes the values were actually read from are excluded, not a whole metadata container:
 /// which element wraps the byline is a per-site question, whereas "the `<a>` I took the author from"
 /// is not.
+/// The outermost members of `all` that lie strictly inside `node`.
+///
+/// Outermost only: `subtree_prose_excluding` and the serializer both jump a skipped subtree whole,
+/// so listing a nested reply's own replies as well would be redundant work.
+fn outermost_nested(arena: &Arena, node: NodeId, end: usize, all: &[NodeId]) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = Vec::new();
+    let mut covered_until = 0usize;
+    // `all` is in document order, so one high-water mark is enough to skip anything nested inside a
+    // reply already listed.
+    for &other in all {
+        let i = other.idx();
+        if i <= node.idx() || i >= end || i < covered_until {
+            continue;
+        }
+        covered_until = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        out.push(other);
+    }
+    out
+}
+
 fn subtree_prose_excluding(arena: &Arena, node: NodeId, skip: &[NodeId]) -> String {
     let end = arena.subtree_end.get(node.idx()).copied().unwrap_or(0) as usize;
     let mut out = String::new();
