@@ -181,7 +181,11 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
             .map_or(0.0, |g| guarded_div(g.prose_len as f32, page_prose as f32)),
         comments,
         metadata,
-        is_listing: listing,
+        // Kept in step with `no_article` on purpose: `docs/output-schema.md` promises
+        // `page_kind: "listing"` accompanies `IndexPage`, and selection can now reach that verdict
+        // on its own -- a page whose `<body>` is mostly links has no article regardless of whether
+        // a repeated template was detected in it.
+        is_listing: listing || matches!(selection.no_article, Some(NoArticle::IndexPage)),
         comment_mask_reverted: reverted,
         group_count: u32::try_from(groups.len()).unwrap_or(u32::MAX),
         article_exclusions,

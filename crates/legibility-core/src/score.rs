@@ -127,10 +127,7 @@ const MAX_UNCOVERED_PROSE: f32 = 0.35;
 /// report full coverage of a page that has none. Candidates arrive in document order, so anything
 /// starting before the current outermost candidate's `subtree_end` is inside it.
 fn uncovered_prose_share(arena: &Arena, cands: &[Candidate], masked_prose: &[u32]) -> f32 {
-    let Some(body) = (0..arena.len()).find(|&i| {
-        arena.kind.get(i).copied() == Some(NodeKind::Element)
-            && arena.tag.get(i).copied() == Some(TagId::BODY)
-    }) else {
+    let Some(body) = body_node(arena).map(NodeId::idx) else {
         return 0.0;
     };
     let page = arena
@@ -159,6 +156,50 @@ fn uncovered_prose_share(arena: &Arena, cands: &[Candidate], masked_prose: &[u32
         covered = covered.saturating_add(prose);
     }
     1.0 - guarded_div(covered as f32, page as f32).clamp(0.0, 1.0)
+}
+
+impl Selection {
+    /// No article, with the reason. Every other field takes its empty value.
+    ///
+    /// Five sites built this by hand with eight lines each, which is five places for a new field to
+    /// be forgotten.
+    fn refused(reason: NoArticle) -> Self {
+        Self {
+            article: None,
+            no_article: Some(reason),
+            confidence: 0,
+            dispersion_floor_used: false,
+            region_is_outermost_by_argmax: false,
+            region_from_semantic_anchor: false,
+            signal_conflict: false,
+        }
+    }
+}
+
+/// Whether the page as a whole is mostly links, and so has no article in it.
+///
+/// A region that wins by default when every real candidate was rejected is worse than nothing. On
+/// the `news.hada.io` front page every containerish candidate holding the page -- `<main>`,
+/// `<article>` and the wrappers, all at 92% of its prose -- fails the link-density floor, which is
+/// correct. What used to happen next is that the argmax was taken over whatever survived, and a
+/// single story `<div>` that had squeaked under the floor was returned as a 92-byte article: one
+/// headline, served as though it were a document.
+///
+/// The test is the floor already applied to every candidate, aimed at `<body>` itself, so there is
+/// no new constant to be wrong about. It also separates the corpus by a real margin: the
+/// link-heaviest page in it is `heise` at 0.734, and that front page is 0.890.
+fn page_is_mostly_links(arena: &Arena) -> bool {
+    body_node(arena).is_some_and(|b| arena.link_density(b) > Candidate::MAX_LINK_DENSITY)
+}
+
+/// The document's `<body>`, if it has one.
+fn body_node(arena: &Arena) -> Option<NodeId> {
+    (0..arena.len())
+        .find(|&i| {
+            arena.kind.get(i).copied() == Some(NodeKind::Element)
+                && arena.tag.get(i).copied() == Some(TagId::BODY)
+        })
+        .map(|i| NodeId(i as u32))
 }
 
 /// Minimum candidates before page-relative statistics mean anything.
@@ -205,10 +246,7 @@ fn is_candidate_tag(tag: TagId) -> bool {
 /// Reached only when the candidate list is empty, so no page that already had an answer can change
 /// its answer here.
 fn body_as_last_resort(arena: &Arena, masked_prose: &[u32]) -> Vec<Candidate> {
-    let Some(body) = (0..arena.len()).find(|&i| {
-        arena.kind.get(i).copied() == Some(NodeKind::Element)
-            && arena.tag.get(i).copied() == Some(TagId::BODY)
-    }) else {
+    let Some(body) = body_node(arena).map(NodeId::idx) else {
         return Vec::new();
     };
     let masked = masked_prose.get(body).copied().unwrap_or(0);
@@ -519,6 +557,10 @@ pub fn select_article(arena: &Arena) -> Selection {
 pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
     let (cands, stats) = collect_masked(arena, masked_prose);
 
+    if page_is_mostly_links(arena) {
+        return Selection::refused(NoArticle::IndexPage);
+    }
+
     // Nothing containerish held prose -- or what did hold prose does not add up to the page.
     // Before concluding there is no article, ask whether the article simply *is* `<body>`; see
     // [`body_as_last_resort`] and [`uncovered_prose_share`].
@@ -539,15 +581,7 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
         // page held any prose whatsoever, which labelled a 404 body ("404 Not Found", 14 bytes)
         // as a listing page. The two reasons lead a caller to do different things, so conflating
         // them is worse than reporting neither.
-        return Selection {
-            article: None,
-            no_article: Some(NoArticle::NoTextContent),
-            confidence: 0,
-            dispersion_floor_used: false,
-            region_is_outermost_by_argmax: false,
-            region_from_semantic_anchor: false,
-            signal_conflict: false,
-        };
+        return Selection::refused(NoArticle::NoTextContent);
     }
 
     // Disqualify unviable candidates *before* ranking, not after.
@@ -583,26 +617,10 @@ pub fn select_article_masked(arena: &Arena, masked_prose: &[u32]) -> Selection {
     let cands = viable;
 
     let Some(&(_, best_idx)) = ranked.first() else {
-        return Selection {
-            article: None,
-            no_article: Some(NoArticle::NoTextContent),
-            confidence: 0,
-            dispersion_floor_used: false,
-            region_is_outermost_by_argmax: false,
-            region_from_semantic_anchor: false,
-            signal_conflict: false,
-        };
+        return Selection::refused(NoArticle::NoTextContent);
     };
     let Some(&best) = cands.get(best_idx) else {
-        return Selection {
-            article: None,
-            no_article: Some(NoArticle::NoTextContent),
-            confidence: 0,
-            dispersion_floor_used: false,
-            region_is_outermost_by_argmax: false,
-            region_from_semantic_anchor: false,
-            signal_conflict: false,
-        };
+        return Selection::refused(NoArticle::NoTextContent);
     };
 
     // Margin over the runner-up, as a ratio. A ratio rather than a difference so it does not

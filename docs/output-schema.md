@@ -152,9 +152,13 @@ is `null` far more often than not, and that is deliberate — guessing costs mor
 
 ## `page_kind` and `diagnostics`
 
-`page_kind: "listing"` is an index or front page: its text is dominated by a repeated template whose
-items have no author or timestamp. Paired with `no_article: "IndexPage"`. **Not a failure** — it is
-the answer.
+`page_kind: "listing"` is an index or front page. **Not a failure** — it is the answer. It is paired
+with `no_article: "IndexPage"` in both directions: either one implies the other.
+
+Two things reach that verdict. Either a repeated template dominates the page's prose and its items
+carry no author or timestamp; or the `<body>` itself is more than 75% links, which is what a link
+aggregator's front page looks like and where no region is an article however the templates fall.
+`lgb explain` names which one fired.
 
 ```jsonc
 "diagnostics": {

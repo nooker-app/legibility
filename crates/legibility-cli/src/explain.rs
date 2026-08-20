@@ -118,7 +118,19 @@ pub fn explain(arena: &Arena, limits: Limits, top: usize) -> String {
                 Candidate::MIN_PURITY,
                 Candidate::MAX_LINK_DENSITY,
             ));
-            if outcome.is_listing {
+            // Two mechanisms reach `IndexPage`, and saying the wrong one sends the reader to the
+            // wrong code. `is_listing` is true for both -- `page_kind` is kept in step with
+            // `no_article` -- so the cause has to be re-derived here rather than read off it.
+            let body_ld = (0..arena.len())
+                .find(|&i| arena.tag.get(i).copied() == Some(TagId::BODY))
+                .map_or(0.0, |b| arena.link_density(legibility_core::NodeId(b as u32)));
+            if body_ld > Candidate::MAX_LINK_DENSITY {
+                s.push_str(&format!(
+                    "  <body> is {:.0}% links, over the {:.0}% floor: no region here is an article\n",
+                    body_ld * 100.0,
+                    Candidate::MAX_LINK_DENSITY * 100.0,
+                ));
+            } else if outcome.is_listing {
                 s.push_str("  a non-comment repeated group holds most of the page's prose\n");
             }
         }

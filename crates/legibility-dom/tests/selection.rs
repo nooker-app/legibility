@@ -1408,3 +1408,74 @@ fn a_front_page_of_links_is_still_an_index_page() {
     let (tag, _, _) = extract(&html);
     assert_eq!(tag, "none", "a front page of story links was served as an article");
 }
+
+/// A page whose `<body>` is mostly links has no article, and must not fall back to a fragment.
+///
+/// The `news.hada.io` front page reported `no_article: null` and served a **92-byte** article: one
+/// story headline. Every candidate that actually held the page — `<main>`, `<article>` and the
+/// wrappers, all at 92% of its prose — was correctly rejected at the link-density floor, and then
+/// the argmax was taken over what survived, which was a single story `<div>` that had squeaked
+/// under it.
+///
+/// The test is the floor already applied to every candidate, aimed at `<body>` itself, so there is
+/// no new constant. It separates the corpus by a real margin too: its link-heaviest page is `heise`
+/// at 0.734, against 0.89 for that front page.
+///
+/// # Why the shapes below are all different
+///
+/// The repeated-template veto would otherwise catch this first and the test would pass without the
+/// fix — which is what a first version of it did. Ten shapes with two members each stay under
+/// `MIN_GROUP`, so no group forms, no veto fires, and the only thing that can refuse the page is
+/// the rule under test. The unlinked `<div>` at the end is the fragment that used to win.
+///
+/// The real front page gets there differently and could not be reduced to this: its items each
+/// carry an author and a timestamp, so `micro_metadata_ratio` is 1.00 and the group reads as a
+/// comment thread rather than a listing.
+#[test]
+fn a_page_that_is_mostly_links_has_no_article() {
+    const SHAPES: [&str; 10] = [
+        "<p>{}</p>",
+        "<div><span>{}</span></div>",
+        "<h3>{}</h3>",
+        "<blockquote>{}</blockquote>",
+        "<div><em>{}</em></div>",
+        "<section>{}</section>",
+        "<div><strong>{}</strong></div>",
+        "<h4>{}</h4>",
+        "<div><small>{}</small></div>",
+        "<figure>{}</figure>",
+    ];
+    let mut links = String::new();
+    let mut n = 0;
+    for shape in SHAPES {
+        for _ in 0..2 {
+            let a = format!(
+                "<a href=\"https://example.test/{n}\">Link label number {n} carrying this \
+                 page's text</a>"
+            );
+            links.push_str(&shape.replace("{}", &a));
+            n += 1;
+        }
+    }
+    let fragment = "<div><span>A promoted headline with no link on it at all</span></div>";
+
+    let html = format!(
+        "<html><head><title>Front | Example</title></head><body><main>{links}{fragment}</main>\
+         </body></html>"
+    );
+    let (tag, text, _) = extract(&html);
+    assert_eq!(tag, "none", "a page of nothing but links was served as an article: {text}");
+
+    // The guard: a link-heavy *article* still extracts. `heise` sits at 0.734 in the corpus, so the
+    // margin below the floor has to be usable rather than theoretical.
+    let prose = "A paragraph of real body text, long enough that the page is predominantly prose \
+                 even though it also carries a great many links in its furniture. ";
+    let html = format!(
+        "<html><head><title>A linky article | Example</title></head><body><main><article>\
+         <p>{prose}</p><p>{prose}</p><p>{prose}</p><p>{prose}</p>{links}</article></main>\
+         </body></html>"
+    );
+    let (tag, text, _) = extract(&html);
+    assert_ne!(tag, "none", "a link-heavy article was refused");
+    assert!(text.contains("A paragraph of real body text"), "the body was lost: {text}");
+}
