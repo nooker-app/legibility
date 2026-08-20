@@ -85,12 +85,16 @@ fn cases() -> Vec<(&'static str, String)> {
 fn reddit_nested_thread() -> String {
     fn comment(id: &str, author: &str, depth: u8, text: &str, children: &str) -> String {
         format!(
-            "<shreddit-comment thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\" \
+            // Attributes and child order copied from the live page: a class every comment
+            // shares, a `<details>` collapse control, the meta slot, the body, then nested
+            // replies as *direct children* alongside them.
+            "<shreddit-comment class=\"relative [contain:style] col-start-2\" \
+             thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\" \
              permalink=\"/r/rss/comments/x/_/{id}/\">\
+             <details><summary>More replies</summary></details>\
              <div slot=\"commentMeta\"><a href=\"/user/{author}/\">{author}</a>\
                <time datetime=\"2026-08-1{depth}T10:00:00Z\">2d ago</time></div>\
-             <div slot=\"comment\"><p>{text}</p></div>\
-             <div slot=\"actionRow\"><button>Reply</button></div>\
+             <div><div><p>{text}</p></div></div>\
              {children}</shreddit-comment>"
         )
     }

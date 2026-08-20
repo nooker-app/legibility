@@ -8,7 +8,7 @@
     "kind":"article",
     "url":null,
     "prose_len":0,
-    "confidence":5022,
+    "confidence":8431,
     "dropped_subtrees":3,
     "unwrapped":2,
     "truncated":false,
@@ -38,8 +38,8 @@
         "parent":null,
         "permalink":null,
         "deleted":false,
-        "text":"Do you still use RSS in 2026? I certainly do, every day.",
-        "html":"<div><p>Do you still use RSS in 2026? I certainly do, every day.</p></div>"
+        "text":"More replies Do you still use RSS in 2026? I certainly do, every day.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>Do you still use RSS in 2026? I certainly do, every day.</p></div></div>"
       },
       {
         "author":"bob",
@@ -48,8 +48,8 @@
         "parent":0,
         "permalink":null,
         "deleted":false,
-        "text":"Yes, I still use RSS every single day for tech news.",
-        "html":"<div><p>Yes, I still use RSS every single day for tech news.</p></div>"
+        "text":"More replies Yes, I still use RSS every single day for tech news.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>Yes, I still use RSS every single day for tech news.</p></div></div>"
       },
       {
         "author":"carol",
@@ -58,8 +58,8 @@
         "parent":1,
         "permalink":null,
         "deleted":false,
-        "text":"I switched to Feedly years ago and never looked back.",
-        "html":"<div><p>I switched to Feedly years ago and never looked back.</p></div>"
+        "text":"More replies I switched to Feedly years ago and never looked back.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>I switched to Feedly years ago and never looked back.</p></div></div>"
       },
       {
         "author":"erin",
@@ -68,8 +68,8 @@
         "parent":0,
         "permalink":null,
         "deleted":false,
-        "text":"Same here, though I moved to a self-hosted reader.",
-        "html":"<div><p>Same here, though I moved to a self-hosted reader.</p></div>"
+        "text":"More replies Same here, though I moved to a self-hosted reader.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>Same here, though I moved to a self-hosted reader.</p></div></div>"
       },
       {
         "author":"dave",
@@ -78,8 +78,8 @@
         "parent":null,
         "permalink":null,
         "deleted":false,
-        "text":"RSS is the last good protocol on the open web today.",
-        "html":"<div><p>RSS is the last good protocol on the open web today.</p></div>"
+        "text":"More replies RSS is the last good protocol on the open web today.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>RSS is the last good protocol on the open web today.</p></div></div>"
       },
       {
         "author":"fay",
@@ -88,8 +88,8 @@
         "parent":null,
         "permalink":null,
         "deleted":false,
-        "text":"I keep about forty feeds and read them each morning.",
-        "html":"<div><p>I keep about forty feeds and read them each morning.</p></div>"
+        "text":"More replies I keep about forty feeds and read them each morning.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>I keep about forty feeds and read them each morning.</p></div></div>"
       },
       {
         "author":"gus",
@@ -98,8 +98,8 @@
         "parent":null,
         "permalink":null,
         "deleted":false,
-        "text":"Newsletters replaced it for me, honestly speaking here.",
-        "html":"<div><p>Newsletters replaced it for me, honestly speaking here.</p></div>"
+        "text":"More replies Newsletters replaced it for me, honestly speaking here.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>Newsletters replaced it for me, honestly speaking here.</p></div></div>"
       },
       {
         "author":"hal",
@@ -108,8 +108,8 @@
         "parent":null,
         "permalink":null,
         "deleted":false,
-        "text":"Feed readers are niche now but the niche is healthy.",
-        "html":"<div><p>Feed readers are niche now but the niche is healthy.</p></div>"
+        "text":"More replies Feed readers are niche now but the niche is healthy.",
+        "html":"<details><summary>More replies</summary></details><div><div><p>Feed readers are niche now but the niche is healthy.</p></div></div>"
       }
     ]
   },
@@ -172,9 +172,9 @@
   "comment_mask_reverted":false,
   "group_count":1,
   "diagnostics":{
-    "node_count":119,
-    "page_prose_len":687,
-    "page_control_len":40,
+    "node_count":127,
+    "page_prose_len":783,
+    "page_control_len":0,
     "page_hidden_len":0,
     "page_alt_len":0,
     "page_inert_len":58,

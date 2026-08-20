@@ -1613,10 +1613,13 @@ fn empty_chrome_does_not_dilute_the_density_of_the_body_that_holds_it() {
 fn a_nested_reply_is_its_own_comment_and_not_part_of_its_parent() {
     fn comment(id: &str, author: &str, depth: u8, text: &str, children: &str) -> String {
         format!(
-            "<shreddit-comment thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\">\
+            // Structure copied from the live page, class included -- see the note in the test.
+            "<shreddit-comment class=\"relative [contain:style] col-start-2\" \
+             thingid=\"t1_{id}\" author=\"{author}\" depth=\"{depth}\">\
+             <details><summary>More replies</summary></details>\
              <div slot=\"commentMeta\"><a href=\"/user/{author}/\">{author}</a>\
                <time datetime=\"2026-08-1{depth}T10:00:00Z\">2d ago</time></div>\
-             <div slot=\"comment\"><p>{text}</p></div>{children}</shreddit-comment>"
+             <div><div><p>{text}</p></div></div>{children}</shreddit-comment>"
         )
     }
     let deep = comment("g1", "carol", 2, "GRANDCHILD only text here.", "");
