@@ -136,7 +136,11 @@ for attempt in 1 2 3; do
     --no-first-run --no-default-browser-check --disable-dev-shm-usage \
     --virtual-time-budget=40000 --dump-dom "http://127.0.0.1:$PORT/drive.html" \
     >"$TMP/dom.html" 2>"$TMP/console.log"
-  grep -q "RESULT " "$TMP/dom.html" && break
+  # `<title>RESULT `, not `RESULT `: the driver script that *sets* the title is itself in the
+  # serialized DOM, so the bare marker matched its own source and this loop never retried once.
+  # It looked like it was working for two days -- the run that exposed it failed every content
+  # check in ten seconds, which is less time than three attempts can take.
+  grep -q "<title>RESULT " "$TMP/dom.html" && break
   [ "$attempt" = 3 ] || say NOTE "the page had not finished rendering; retrying ($attempt of 3)"
 done
 
@@ -182,7 +186,16 @@ checks = [
 ]
 for name, ok in checks:
     print(f"        {'ok  ' if ok else 'FAIL'}  {name}")
-sys.exit(1 if [n for n, ok in checks if not ok] else 0)
+if [n for n, ok in checks if not ok]:
+    # What the page actually said. "The engine returned an error", "the render never finished" and
+    # "the DOM is not the shape this script expects" look identical when every check fails at once,
+    # and telling them apart has now cost two CI cycles.
+    print(f"        title: {title[:300]!r}")
+    print(f"        root:  {root[:200]!r}")
+    if res:
+        print(f"        result: {json.dumps(res)[:300]}")
+    sys.exit(1)
+sys.exit(0)
 PY
 then say PASS "renders a full reader view in a browser"
 else
