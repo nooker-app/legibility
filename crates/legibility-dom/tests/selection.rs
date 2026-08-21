@@ -1667,3 +1667,83 @@ fn a_nested_reply_is_its_own_comment_and_not_part_of_its_parent() {
     assert!(mid.text.contains("CHILD only"), "the reply lost its own text: {}", mid.text);
     assert!(!mid.text.contains("GRANDCHILD"), "a grandchild leaked into its parent: {}", mid.text);
 }
+
+/// A long lone comment must not become the article, nor the submission become the comment.
+///
+/// Reported against `news.hada.io/topic?id=32563`, and the report was exact: body and comment came
+/// back **swapped**. The page has one comment — a 7 KB summary of a Hacker News thread — against a
+/// 500-byte submission body. Nothing masked the comment, because one element cannot form a repeated
+/// group, so it outweighed the submission and won the region. The submission then sat *outside* that
+/// region carrying an author link, a timestamp and prose, which is exactly what the lone-comment
+/// search was looking for, and it came back as the comment.
+///
+/// Two things had to change. `lone_comment` looks inside containers that name themselves a comment
+/// section, which is knowable before anything is scored, so it no longer depends on a region that
+/// may be wrong. And the comment it finds is masked before selection, like any other thread, which
+/// stops the inversion at its source instead of relabelling it afterwards.
+///
+/// The mask has to roll up to ancestors, and a first version did not: zeroing the comment's own
+/// subtree left the `<div>` wrapping it at full strength, so that wrapper won the region and the
+/// article came back **empty** once the comment was excluded from its output.
+#[test]
+fn a_long_lone_comment_does_not_trade_places_with_the_submission() {
+    // The submission body: short, and the thing a reader came for.
+    let body = "<section itemprop=\"articleBody\"><ul>\
+        <li>Switching nameservers to a CDN silently injected an analytics snippet into a site \
+          that ships no JavaScript at all.</li>\
+        <li>Turning it off required adding the site to an analytics dashboard first, then \
+          disabling the snippet from there.</li>\
+        <li>A feature like this should be opt-in rather than on-by-default with an opt-out.</li>\
+        </ul></section>";
+    // The comment: fourteen times longer, which is the whole difficulty.
+    let long: String = (0..14)
+        .map(|i| {
+            format!(
+                "<li>Aggregated opinion number {i} from another site's thread, restated at \
+                 length and carrying rather more text than the submission it hangs beneath.</li>"
+            )
+        })
+        .collect();
+
+    let html = format!(
+        "<html><head><title>Nameserver switch injects analytics | GeekNews</title>\
+         <meta property=\"og:site_name\" content=\"GeekNews\"></head><body><main><article>\
+         <h1>Nameserver switch injects analytics</h1>\
+         <div class=\"topicinfo\">1P by <a href=\"/@poster\">poster</a> \
+           <time datetime=\"2026-08-20T09:00:00+09:00\">1일전</time> | \
+           <a href=\"topic?id=1\">댓글 1개</a></div>\
+         <div class=\"topic_contents\">{body}</div>\
+         <div id=\"comment_thread\" class=\"comment_thread descendant\">\
+           <div class=\"comment_row\" id=\"cid1\">\
+             <div class=\"commentinfo\"><a href=\"/@summarybot\">summarybot</a>\
+               <time datetime=\"2026-08-20T10:00:00+09:00\">1일전</time></div>\
+             <div class=\"commentTD\"><span><h6>Opinions from elsewhere</h6><ul>{long}</ul>\
+               </span></div></div></div>\
+         </article></main></body></html>"
+    );
+
+    let (arena, _) = BuildArena::parse_to_arena(&html, Limits::DEFAULT);
+    let out = legibility_core::extract_all(&arena, Limits::DEFAULT);
+
+    let region = out.selection.article.expect("the page came back with no article at all");
+    let text = legibility_dom::json::prose_text_excluding(&arena, region, &out.article_exclusions);
+    assert!(
+        text.contains("Switching nameservers to a CDN"),
+        "the article is not the submission body: {text}"
+    );
+    assert!(
+        !text.contains("Aggregated opinion number"),
+        "the comment leaked into the article: {text}"
+    );
+    assert!(!text.is_empty(), "the article came back empty");
+
+    assert_eq!(out.comments.items.len(), 1, "the comment was not found");
+    let c = &out.comments.items[0];
+    assert_eq!(c.author.as_deref(), Some("summarybot"), "wrong author: {:?}", c.author);
+    assert!(c.text.contains("Aggregated opinion number"), "the comment lost its text: {}", c.text);
+    assert!(
+        !c.text.contains("Switching nameservers to a CDN"),
+        "the submission came back as the comment: {}",
+        c.text
+    );
+}

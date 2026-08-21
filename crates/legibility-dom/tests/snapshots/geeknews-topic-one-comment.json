@@ -8,7 +8,7 @@
     "kind":"article",
     "url":null,
     "prose_len":391,
-    "confidence":6034,
+    "confidence":6351,
     "dropped_subtrees":0,
     "unwrapped":0,
     "truncated":false,
@@ -36,7 +36,7 @@
         "timestamp":"2026-08-05T23:00:00+09:00",
         "depth":0,
         "parent":null,
-        "permalink":"#comment_thread",
+        "permalink":"#cid0",
         "deleted":false,
         "text":"이 기능은 정말 기대되네요. 터미널을 떠나지 않고 작업할 수 있다는 점이 특히 좋습니다. 첫째 이유 둘째 이유",
         "html":"<div><span><p>이 기능은 <strong>정말</strong> 기대되네요. 터미널을 떠나지 않고 작업할 수 있다는 점이 특히 좋습니다.</p><ul><li>첫째 이유</li><li>둘째 이유</li></ul></span></div>"

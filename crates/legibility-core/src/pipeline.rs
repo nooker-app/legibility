@@ -76,17 +76,35 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
         (g.prose_len, core::cmp::Reverse(g.members.first().map_or(u32::MAX, |m| m.0)))
     });
 
-    let masked = if thread.is_some() {
+    // A thread of one, found before scoring so that it can be masked like any other thread.
+    //
+    // Ordering is the whole point. `news.hada.io/topic?id=32563` has one comment -- a long summary
+    // of a Hacker News thread -- and nothing masked it, because one element cannot form a repeated
+    // group. It outweighed the submission body and became the article; the submission, being
+    // outside that region, then looked exactly like a comment. Body and comment came back swapped.
+    let lone = if thread.is_none() {
+        groups::lone_comment(arena, stated_total, &named_comment_sections(arena))
+    } else {
+        None
+    };
+
+    let mut masked = if thread.is_some() {
         groups::mask_comment_prose(arena, &groups, stated_total)
     } else {
         alloc::vec![0u32; arena.len()]
     };
+    if let Some(g) = &lone {
+        // Through `mask_subtrees`, which rolls the totals up to ancestors. Zeroing only the
+        // comment's own subtree left the `<div>` wrapping it at full strength, so that wrapper won
+        // and the article came back empty once the comment was excluded from it.
+        masked = groups::mask_subtrees(arena, &g.members);
+    }
 
     let mut selection = score::select_article_masked(arena, &masked);
     let mut reverted = false;
 
     // Recovery: masking must never be able to turn a page with an article into a page without one.
-    if selection.article.is_none() && thread.is_some() {
+    if selection.article.is_none() && (thread.is_some() || lone.is_some()) {
         let unmasked = score::select_article(arena);
         if unmasked.article.is_some() {
             selection = unmasked;
@@ -112,8 +130,7 @@ pub fn run(arena: &Arena, limits: Limits) -> Outcome {
             // Repetition found nothing. If the page says it has exactly one comment, there is
             // nothing to repeat -- see `groups::lone_comment`, which trusts the stated count the
             // same way `is_comment_thread` already does to admit a pair.
-            let lone = groups::lone_comment(arena, stated_total, selection.article);
-            let mut set = match &lone {
+            let mut set = match lone.as_ref().filter(|_| !reverted) {
                 Some(g) => comments::extract(arena, g, limits.max_comment_items),
                 None => CommentSet::default(),
             };
@@ -232,21 +249,6 @@ pub fn comment_section_nodes(
     region: crate::NodeId,
     already: &[crate::NodeId],
 ) -> Vec<crate::NodeId> {
-    /// Section-like `class`/`id` tokens. Plural or structural forms only; see above.
-    const SECTION_TOKENS: [&str; 11] = [
-        "comments",
-        "comment-list",
-        "commentlist",
-        "comment-tree",
-        "comment-section",
-        "comment-thread",
-        "commentthread",
-        "disqus_thread",
-        "disqus-thread",
-        "respond",
-        "댓글",
-    ];
-
     let region_prose = arena.prose_len.get(region.idx()).copied().unwrap_or(0);
     let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
 
@@ -265,14 +267,7 @@ pub fn comment_section_nodes(
             continue;
         }
         let by_name = arena.tag_name(node).is_some_and(|n| n.contains("comment"));
-        let by_attr = [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
-            .iter()
-            .filter_map(|&a| arena.attr(node, a))
-            .any(|v| {
-                v.split(|c: char| c.is_whitespace())
-                    .any(|t| SECTION_TOKENS.iter().any(|s| t.eq_ignore_ascii_case(s)))
-            });
-        if by_name || by_attr {
+        if by_name || names_a_comment_section(arena, node) {
             found.push(node);
             covered_until = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
         }
@@ -284,6 +279,62 @@ pub fn comment_section_nodes(
         return Vec::new();
     }
     found
+}
+
+/// Section-like `class`/`id` tokens naming a comment area. Plural or structural forms only.
+const SECTION_TOKENS: [&str; 9] = [
+    "comments",
+    "commentlist",
+    "commenttree",
+    "commentsection",
+    "commentthread",
+    "disqusthread",
+    "respond",
+    "댓글",
+    "commentarea",
+];
+
+/// Whether an element's `class` or `id` names a comment section.
+///
+/// Separators are stripped before comparing, so `comment_thread`, `comment-thread` and
+/// `commentThread` are one token (`bare` below strips them). They were not: the list held the hyphenated and run-together
+/// spellings and the match split on whitespace only, so `class='comment_thread descendant'` on
+/// `GeekNews` matched nothing, and the underscore is the commonest spelling of the three.
+#[must_use]
+pub fn names_a_comment_section(arena: &Arena, node: crate::NodeId) -> bool {
+    [crate::arena::AttrName::CLASS, crate::arena::AttrName::ID]
+        .into_iter()
+        .filter_map(|a| arena.attr(node, a))
+        .any(|v| {
+            v.split_whitespace().any(|t| {
+                let bare: alloc::string::String =
+                    t.chars().filter(|c| *c != '-' && *c != '_').collect();
+                SECTION_TOKENS.iter().any(|s| bare.eq_ignore_ascii_case(s))
+            })
+        })
+}
+
+/// Every element in the document naming itself a comment section, outermost first.
+///
+/// Used to find a thread *before* the article is chosen, which is what [`groups::lone_comment`]
+/// needs: a thread of one has to be masked like any other thread, and masking happens before
+/// scoring. Keyed on the site's own name for the container rather than on the region, because the
+/// region is not known yet -- and on `news.hada.io/topic?id=32563` the region is wrong precisely
+/// because the thread was never masked.
+fn named_comment_sections(arena: &Arena) -> Vec<crate::NodeId> {
+    let mut out: Vec<crate::NodeId> = Vec::new();
+    let mut covered_until = 0usize;
+    for i in 0..arena.len() {
+        if arena.kind.get(i).copied() != Some(crate::NodeKind::Element) || i < covered_until {
+            continue;
+        }
+        let node = crate::NodeId(i as u32);
+        if names_a_comment_section(arena, node) {
+            covered_until = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+            out.push(node);
+        }
+    }
+    out
 }
 
 /// Boilerplate tokens in `class` or `id`, **corroborated by structure**.

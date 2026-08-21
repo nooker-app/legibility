@@ -621,72 +621,67 @@ pub fn debug_probes(arena: &Arena, node: NodeId) -> (bool, bool, bool) {
 /// # Why repetition cannot find this
 ///
 /// Every path into [`find_groups`] needs at least [`MIN_SIBLINGS`] look-alike children, because a
-/// repeated template is the evidence it trusts. A thread of one has no repetition in it at all:
+/// repeated template is the evidence it trusts. A thread of one has no repetition in it:
 /// `news.hada.io/topic?id=32177` renders `<div id="comment_thread">` around a single
-/// `<div class="comment_row">`, the parent is skipped for having one element child, no group is
-/// built, and the page reports `present: 0, claimed_total: 1, truncated: true`. Honest, and still a
-/// comment we failed to read.
+/// `<div class="comment_row">`, the parent is skipped for having one element child, and the page
+/// reports `present: 0, claimed_total: 1, truncated: true`.
 ///
-/// # What is trusted instead
+/// # Why it is found inside a *named section* rather than outside the article
 ///
-/// The page's own count, exactly as [`Group::is_comment_thread`] already trusts it to admit a
-/// *pair* below `MIN_GROUP` — "requiring an exact match rather than a floor is what makes it
-/// evidence". The same argument reaches one, and this is deliberately the narrowest form of it:
+/// The first version took the chosen article region and looked for a candidate outside it. That
+/// works only if the region is right, and on `news.hada.io/topic?id=32563` it is not: the lone
+/// comment is a long summary of a Hacker News thread, nothing masked it because no group formed, so
+/// it beat the submission body and *became* the article -- and the submission, being outside that
+/// region, then satisfied every test here and came back as the comment. The two were reported
+/// swapped, and they were.
 ///
-/// - it runs only when the page states **exactly one** comment;
-/// - the document must contain **exactly one** element with a comment's shape — an author link and
-///   a timestamp, and an authored paragraph. Two candidates and it declines, because then the count
-///   corroborates nothing;
-/// - the candidate must not be an ancestor or descendant of the article region, so a byline inside
-///   the body cannot be promoted into a thread.
+/// So the search is scoped to containers naming themselves a comment section, which is knowable
+/// before anything is scored. That lets the caller mask this comment like any other thread, which is
+/// what stops the inversion at its source rather than relabelling it afterwards.
 ///
-/// A page that states no total cannot reach this, which is most of the web.
+/// Still the narrowest form of the argument [`Group::is_comment_thread`] already makes when it
+/// admits a *pair* below `MIN_GROUP` -- "requiring an exact match rather than a floor is what makes
+/// it evidence". Only when the page states exactly one comment; only when exactly one element in
+/// those sections has a comment's shape, an author link and a timestamp and written content. A page
+/// that states no total cannot reach it.
 #[must_use]
 pub fn lone_comment(
     arena: &Arena,
     stated_total: Option<u32>,
-    region: Option<NodeId>,
+    sections: &[NodeId],
 ) -> Option<Group> {
     if stated_total != Some(1) {
         return None;
     }
-    let (region_start, region_end) = match region {
-        Some(r) => (r.idx(), arena.subtree_end.get(r.idx()).copied().unwrap_or(0) as usize),
-        None => (usize::MAX, usize::MAX),
-    };
-
     let mut found: Option<NodeId> = None;
-    for i in 0..arena.len() {
-        if arena.kind.get(i).copied() != Some(NodeKind::Element) {
-            continue;
+    for &section in sections {
+        let sec_end = arena.subtree_end.get(section.idx()).copied().unwrap_or(0) as usize;
+        for i in (section.idx() + 1)..sec_end.min(arena.len()) {
+            if arena.kind.get(i).copied() != Some(NodeKind::Element) {
+                continue;
+            }
+            let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+            let node = NodeId(i as u32);
+            if !has_author_link(arena, node, end)
+                || !has_timestamp(arena, node, end)
+                || !holds_written_content(arena, node, end)
+            {
+                continue;
+            }
+            // The outermost such element, not every ancestor of it: a comment's wrapper carries the
+            // same author link and timestamp the comment does.
+            if found.is_some_and(|f| {
+                let fe = arena.subtree_end.get(f.idx()).copied().unwrap_or(0) as usize;
+                i > f.idx() && i < fe
+            }) {
+                continue;
+            }
+            if found.is_some() {
+                // A second, unrelated candidate. The stated count no longer distinguishes anything.
+                return None;
+            }
+            found = Some(node);
         }
-        // Inside the article, or wrapping it: a dateline is not a reply.
-        let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
-        if region_start != usize::MAX
-            && (i > region_start && i < region_end || end >= region_end && i <= region_start)
-        {
-            continue;
-        }
-        let node = NodeId(i as u32);
-        if !has_author_link(arena, node, end)
-            || !has_timestamp(arena, node, end)
-            || !holds_written_content(arena, node, end)
-        {
-            continue;
-        }
-        // The outermost such element, not every ancestor of it. A comment's wrapper carries the
-        // same author link and timestamp as the comment does.
-        if found.is_some_and(|f| {
-            let fe = arena.subtree_end.get(f.idx()).copied().unwrap_or(0) as usize;
-            i > f.idx() && i < fe
-        }) {
-            continue;
-        }
-        if found.is_some() {
-            // A second, unrelated candidate. The count no longer distinguishes anything.
-            return None;
-        }
-        found = Some(node);
     }
 
     let node = found?;
@@ -954,6 +949,7 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
     // `<div class="markdown-body">` stayed a full-strength candidate, and on a GeekNews thread one
     // of them beat the twenty-one-character submission body. Masking a container has to mean its
     // contents are out of the running, or it means nothing.
+    let mut roots: Vec<NodeId> = Vec::new();
     let mut masked = alloc::vec![0u32; arena.len()];
     // Strictly inside a masked comment, as opposed to being the comment's own root. The two need
     // different treatment in the roll-up: the root contributes to its ancestors, the interior must
@@ -977,6 +973,7 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
         if !identities.contains(&id) {
             continue;
         }
+        roots.push(node);
         let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
         if let Some(slot) = is_root.get_mut(i) {
             *slot = true;
@@ -997,6 +994,56 @@ pub fn mask_comment_prose(arena: &Arena, groups: &[Group], stated_total: Option<
     // Roll up to ancestors above the comments. Interior nodes are skipped: their parent is inside
     // the same comment and already carries the full total, so adding again would double-count and
     // could push a container's masked prose above its actual prose.
+    let mut out = masked.clone();
+    for i in (0..arena.len()).rev() {
+        if inside.get(i).copied().unwrap_or(false) && !is_root.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        let Some(&parent) = arena.parent.get(i) else { continue };
+        if !parent.is_some() {
+            continue;
+        }
+        let v = out.get(i).copied().unwrap_or(0);
+        if v > 0 {
+            if let Some(slot) = out.get_mut(parent.idx()) {
+                *slot = slot.saturating_add(v);
+            }
+        }
+    }
+    out
+}
+
+/// Mask the prose of each subtree in `roots`, rolling the totals up to their ancestors.
+///
+/// The roll-up is the part that is easy to leave out and impossible to notice without it. Zeroing a
+/// comment's own subtree does nothing for the `<div>` that wraps it: that wrapper's prose is still
+/// counted in full, so it remains a full-strength candidate and wins -- and then excluding the
+/// comment from its output leaves an empty article. That is exactly what happened on
+/// `news.hada.io/topic?id=32563` when a first version of the lone-comment mask skipped this step.
+///
+/// `roots` must be non-overlapping and in document order, which is what [`lone_comment`] returns.
+#[must_use]
+pub fn mask_subtrees(arena: &Arena, roots: &[NodeId]) -> Vec<u32> {
+    let mut masked = alloc::vec![0u32; arena.len()];
+    let mut inside = alloc::vec![false; arena.len()];
+    let mut is_root = alloc::vec![false; arena.len()];
+
+    for &r in roots {
+        let i = r.idx();
+        let end = arena.subtree_end.get(i).copied().unwrap_or(0) as usize;
+        if let Some(slot) = is_root.get_mut(i) {
+            *slot = true;
+        }
+        for j in i..end.max(i + 1) {
+            if let Some(slot) = masked.get_mut(j) {
+                *slot = arena.prose_len.get(j).copied().unwrap_or(0);
+            }
+            if let Some(slot) = inside.get_mut(j) {
+                *slot = true;
+            }
+        }
+    }
+
     let mut out = masked.clone();
     for i in (0..arena.len()).rev() {
         if inside.get(i).copied().unwrap_or(false) && !is_root.get(i).copied().unwrap_or(false) {
