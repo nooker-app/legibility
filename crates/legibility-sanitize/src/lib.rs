@@ -28,6 +28,9 @@
 
 use core::marker::PhantomData;
 
+mod anchors;
+pub use anchors::FragmentTargets;
+
 /// Sanitization profile.
 pub trait Profile: private::Sealed {
     /// Human-readable name, used in diagnostics.
@@ -349,19 +352,6 @@ pub fn filter_code_class(value: &str) -> Option<String> {
     }
 }
 
-/// Rewrite an `id` into the profile's namespace.
-///
-/// DOM clobbering is the reason. An element with `id="attributes"` or `id="children"` shadows
-/// those properties on its parent node, so unnamespaced ids from untrusted markup can break a
-/// consumer's own DOM traversal. Prefixing keeps permalink anchors working while removing the
-/// collision.
-#[must_use]
-pub fn namespace_id<P: Profile>(id: &str) -> String {
-    let safe: String =
-        id.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')).collect();
-    format!("{}{safe}", P::ID_PREFIX)
-}
-
 /// Escape text for an HTML text node.
 ///
 /// U+FEFF is dropped rather than escaped. At the start of a document it is a byte-order mark and
@@ -507,18 +497,6 @@ mod tests {
         assert_eq!(filter_code_class("hljs theme-dark"), None);
         assert_eq!(filter_code_class("language-"), None, "empty language is not a language");
         assert_eq!(filter_code_class("language-<script>"), None);
-    }
-
-    #[test]
-    fn ids_are_namespaced_against_dom_clobbering() {
-        // These exact ids shadow real DOM properties on the parent node.
-        for hostile in ["attributes", "children", "documentElement", "firstChild", "id"] {
-            let out = namespace_id::<UserContent>(hostile);
-            assert!(out.starts_with("lg-c-"), "{out} must be namespaced");
-            assert_ne!(out, hostile);
-        }
-        // Namespacing also sanitizes: quotes cannot escape the attribute.
-        assert_eq!(namespace_id::<Article>("a\"><script>"), "lg-ascript");
     }
 
     #[test]

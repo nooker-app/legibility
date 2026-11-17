@@ -2,7 +2,7 @@
   "schema_version":1,
   "url":null,
   "article":{
-    "html":"<section><ul><li>Warp Terminal의 다중 모델 코딩 에이전트를 <strong>독립형 CLI</strong>로 제공해 다른 터미널에서도 사용할 수 있음</li><li>tmux와 유사한 <strong>멀티플렉싱 구조</strong>로 PTY 연결을 관리함</li></ul><h2>선호하는 터미널에서 실행하는 독립형 에이전트</h2><p>전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 라우팅을 기본 제공함</p></section>",
+    "html":"<section id=\"lg-1\"><ul><li>Warp Terminal의 다중 모델 코딩 에이전트를 <strong>독립형 CLI</strong>로 제공해 다른 터미널에서도 사용할 수 있음</li><li>tmux와 유사한 <strong>멀티플렉싱 구조</strong>로 PTY 연결을 관리함</li></ul><h2>선호하는 터미널에서 실행하는 독립형 에이전트</h2><p>전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 라우팅을 기본 제공함</p></section>",
     "text":"Warp Terminal의 다중 모델 코딩 에이전트를 독립형 CLI 로 제공해 다른 터미널에서도 사용할 수 있음 tmux와 유사한 멀티플렉싱 구조 로 PTY 연결을 관리함 선호하는 터미널에서 실행하는 독립형 에이전트 전문 개발자를 위한 비용 최적화형 다중 모델 하네스로, 작업 복잡도 기반 자동 라우팅을 기본 제공함",
     "tag":"section",
     "kind":"article",

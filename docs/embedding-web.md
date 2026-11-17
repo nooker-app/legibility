@@ -6,7 +6,7 @@ yet; you take the `.wasm` and about forty lines of glue.
 ## Build the module
 
 ```sh
-cargo build --release -p legibility-wasm --target wasm32-unknown-unknown
+cargo build --locked --release -p legibility-wasm --target wasm32-unknown-unknown
 wasm-opt -O3 --enable-bulk-memory \
   target/wasm32-unknown-unknown/release/legibility_wasm.wasm \
   -o legibility.wasm            # ~790 KB -> ~670 KB
@@ -111,6 +111,22 @@ Your options, in the order they cost you something:
 Many sites answer a data-centre address with a 403 while serving a browser normally — `news.hada.io`
 and Reddit both do. No proxy gets past that, and the demo detects the resulting block page rather
 than extracting it as an article.
+
+## In-document links
+
+The sanitizer preserves surviving `id` targets and legacy `<a name>` targets as generated IDs:
+`lg-1`, `lg-2`, … for an article and `lg-c-1`, `lg-c-2`, … for user content. Local `href="#…"`
+links are rewritten together, including percent-encoded Unicode and footnote IDs such as `fn:1`.
+Duplicate source IDs link to the first surviving target. An anchor's legacy name is an alias for
+its generated ID; raw `name` attributes are never emitted. External and path/query URLs retain
+their fragments. Fragment-only links with no surviving target lose their `href`; empty or
+unmatched `top` fragments become `#`.
+
+Reserve both namespaces in the host document. IDs are local to one serialized region, not durable
+permalinks or globally unique across articles/comments: isolate independent regions in separate
+documents or scope both their IDs and fragment links when combining them. Selection, hidden/control
+filtering, depth limits and truncation can still remove targets; this does not restore removed
+content. Absolute URLs back to the original page are not converted into local links.
 
 ## Limits
 

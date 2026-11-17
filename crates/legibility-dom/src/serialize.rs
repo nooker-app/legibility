@@ -9,9 +9,11 @@
 //! policy allowed, not what a filter later removed.
 
 use legibility_core::a11y::TextRole;
+use legibility_core::arena::AttrName;
 use legibility_core::{Arena, NodeId, NodeKind};
 use legibility_sanitize::{
-    escape_attr, escape_text, filter_code_class, is_void, wrap, Profile, SanitizedHtml,
+    escape_attr, escape_text, filter_code_class, is_void, wrap, FragmentTargets, Profile,
+    SanitizedHtml,
 };
 
 /// Options affecting what reaches the output.
@@ -84,6 +86,7 @@ pub fn serialize_region_excluding<P: Profile>(
 ) -> (SanitizedHtml<P>, SerializeReport) {
     let mut out = String::new();
     let mut report = SerializeReport::default();
+    let mut anchors = AnchorState::<P>::new(arena.len());
     let end = arena.subtree_end.get(region.idx()).copied().unwrap_or(0) as usize;
     let start = region.idx();
 
@@ -249,7 +252,7 @@ pub fn serialize_region_excluding<P: Profile>(
 
                         out.push('<');
                         out.push_str(name);
-                        write_attrs::<P>(arena, i, name, &mut out, &mut report);
+                        write_attrs::<P>(arena, i, name, &mut out, &mut report, &mut anchors);
                         out.push('>');
 
                         // A newline immediately after `<pre>` is dropped when the output is parsed
@@ -297,6 +300,10 @@ pub fn serialize_region_excluding<P: Profile>(
         }
     }
 
+    // Only emitted targets are registered. Resolving after the walk supports forward links and
+    // avoids linking to excluded, hidden, flattened or truncated-away nodes. Rebuild once, rather
+    // than shifting the output once per link (quadratic on a page full of references).
+    out = anchors.rewrite_links(out);
     collapse_empty_wrappers(&mut out, &mut report);
     collapse_blank_runs(&mut out);
     (wrap::<P>(out), report)
@@ -347,6 +354,8 @@ fn collapse_empty_wrappers(out: &mut String, report: &mut SerializeReport) {
             let empty = !name.is_empty()
                 && !name.starts_with('/')
                 && !KEEP_EMPTY.contains(&name)
+                // Empty permalink targets, especially legacy <a name>, are meaningful content.
+                && !open.contains(" id=\"")
                 && after.trim_start().starts_with(close.as_str());
             if empty {
                 // Drop both tags and the whitespace between them.
@@ -491,7 +500,16 @@ fn write_attrs<P: Profile>(
     tag: &str,
     out: &mut String,
     report: &mut SerializeReport,
+    anchors: &mut AnchorState<P>,
 ) {
+    // Identity is handled separately from ordinary attributes: raw id/name never pass through.
+    let id = NodeId(node as u32);
+    let legacy_name = (tag == "a").then(|| arena.attr(id, AttrName::NAME)).flatten();
+    if let Some(target) = anchors.targets.register(arena.attr(id, AttrName::ID), legacy_name) {
+        out.push_str(" id=\"");
+        out.push_str(&target);
+        out.push('"');
+    }
     let mut wrote_rel = false;
     for a in arena.attrs_of(NodeId(node as u32)) {
         let name = a.name.as_str();
@@ -517,20 +535,25 @@ fn write_attrs<P: Profile>(
                 None => continue,
             },
             "class" => continue,
-            // Namespaced so that a page-authored `id` cannot collide with the host document's,
-            // which is how DOM clobbering starts.
-            "id" => legibility_sanitize::namespace_id::<P>(value),
             "rel" if P::FORCED_REL.is_some() => continue,
             _ => value.to_string(),
         };
         if name == "rel" {
             wrote_rel = true;
         }
+        let attr_start = out.len();
         out.push(' ');
         out.push_str(name);
         out.push_str("=\"");
-        out.push_str(&escape_attr(&emitted));
+        let fragment = (name == "href").then(|| emitted.strip_prefix('#')).flatten();
+        // Reserve the longest possible generated href before enforcing the byte cap. Resolving a
+        // short source href (#x) later must not expand thousands of links beyond that cap.
+        let value = if fragment.is_some() { &anchors.placeholder_href } else { &emitted };
+        out.push_str(&escape_attr(value));
         out.push('"');
+        if let Some(fragment) = fragment {
+            anchors.links.push((attr_start..out.len(), fragment.to_owned()));
+        }
     }
     // `rel` on user content is forced, not merely allowed: a comment must not be able to opt out
     // of `nofollow noopener noreferrer` by supplying its own.
@@ -540,6 +563,42 @@ fn write_attrs<P: Profile>(
             out.push_str(&escape_attr(rel));
             out.push('"');
         }
+    }
+}
+
+/// Pending local href attributes and the targets that actually survived the serialization walk.
+struct AnchorState<P: Profile> {
+    targets: FragmentTargets<P>,
+    links: Vec<(std::ops::Range<usize>, String)>,
+    placeholder_href: String,
+}
+
+impl<P: Profile> AnchorState<P> {
+    fn new(max_targets: usize) -> Self {
+        Self {
+            targets: FragmentTargets::default(),
+            links: Vec::new(),
+            placeholder_href: format!("#{}{max_targets}", P::ID_PREFIX),
+        }
+    }
+
+    fn rewrite_links(self, out: String) -> String {
+        if self.links.is_empty() {
+            return out;
+        }
+        let mut rewritten = String::with_capacity(out.len());
+        let mut previous = 0;
+        for (range, fragment) in self.links {
+            rewritten.push_str(&out[previous..range.start]);
+            if let Some(href) = self.targets.resolve(&fragment) {
+                rewritten.push_str(" href=\"");
+                rewritten.push_str(&href);
+                rewritten.push('"');
+            }
+            previous = range.end;
+        }
+        rewritten.push_str(&out[previous..]);
+        rewritten
     }
 }
 
